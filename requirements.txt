@@ -1,0 +1,8 @@
+# Core simulation dependency used by the notebook model.
+simpy==4.1.2
+
+# Notebook support for running the existing .ipynb workflow in the project venv.
+ipykernel==7.4.0
+
+# Test runner used by the repo's pytest-based checks.
+pytest==9.1.1
