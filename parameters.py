@@ -1,9 +1,11 @@
 import dataclasses as dc
 
-
+#define a class that holds the parameters for the simulation
 @dc.dataclass(frozen=True)
 class SimulationParameters:
     scenario_name: str = "baseline"
+    baseline_response_probability: float = 0.05
+    first_day_probability: float = 0.5
     num_households: int = 10
     sms_response_probability: float = 0.3
     seed: int = 1
@@ -13,6 +15,10 @@ class SimulationParameters:
     )
 
 
+#Name the baseline paramaters for the simulation
+baseline_parameters = SimulationParameters()
 
-DEFAULT_PARAMETERS = SimulationParameters()
-new_parameters = dc.replace(DEFAULT_PARAMETERS, scenario_name = "new_scenario", num_households = 20)
+#setup example new parameters. No need to make new from scratch, just replace the values you want to change
+new_scenario_parameters = dc.replace(baseline_parameters, scenario_name = "new_scenario", num_households = 20)
+
+print(baseline_parameters)
