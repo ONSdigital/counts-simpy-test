@@ -9,8 +9,8 @@ from functions.functions_sms import sms_day_n_increase_baseline
 def test_sms_day_n_increase_baseline_increases_each_household_probability_after_the_delay():
 	env = simpy.Environment()
 	households = [
-		SimpleNamespace(response_probability=0.05),
-		SimpleNamespace(response_probability=0.2),
+		SimpleNamespace(response_probability=0.05, responded=False),
+		SimpleNamespace(response_probability=0.2, responded=False),
 	]
 
 	env.process(sms_day_n_increase_baseline(env, households, 3))

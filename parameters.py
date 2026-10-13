@@ -10,6 +10,10 @@ class SimulationParameters:
     sms_response_probability: float = 0.3
     seed: int = 1
     sms_timing: int = 10
+    field_visit_day: int = 7
+    field_visit_duration: float = 0.1
+    field_visit_response_boost: float = 0.2
+    field_daily_queue_size: int = 3
     intervention_costs: dict[str, float] = dc.field(
         default_factory=lambda: {"sms": 0.05}
     )

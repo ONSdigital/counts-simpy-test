@@ -1,7 +1,7 @@
 #sends sms at start of n, updates sms_list immediately after end of day update
 from functions import intervention_lists
 
-
+#increase the response probability + remove those households that have responded
 def sms_day_n_increase_baseline(env, sms_list, n):
     yield env.timeout(n)
     for household in sms_list:
