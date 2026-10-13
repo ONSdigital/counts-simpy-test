@@ -1,0 +1,11 @@
+#sends sms at start of n, updates sms_list immediately after end of day update
+from functions import intervention_lists
+
+
+def sms_day_n_increase_baseline(env, sms_list, n):
+    yield env.timeout(n)
+    for household in sms_list:
+        household.response_probability += 0.1
+    print(f" Day {env.now}, SMS sent to houses on sms_list. Probabilities updated")
+    yield env.timeout(0.6)
+    sms_list[:] = [household for household in sms_list if household.responded is False]
