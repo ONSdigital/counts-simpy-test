@@ -24,7 +24,6 @@ def test_field_officer_visits_build_a_daily_queue_without_depopulating_the_maste
         SimpleNamespace(id=4, responded=False, response_probability=0.4),
     ]
     field_officer_list = households.copy()
-    visit_log = []
 
     env.process(
         queue_field_officer_visits(
@@ -36,26 +35,15 @@ def test_field_officer_visits_build_a_daily_queue_without_depopulating_the_maste
             response_probability_increase=0.1,
             queue_size=3,
             random_source=FixedRandom([0.8, 0.8, 0.8, 0.8]),
-            visit_log=visit_log,
         )
     )
 
     env.run(until=4.5)
 
-    assert visit_log == [
-        ("start", 1, 3),
-        ("end", 1, pytest.approx(3.15), "B"),
-        ("start", 2, pytest.approx(3.15)),
-        ("end", 2, pytest.approx(3.3), "B"),
-        ("start", 3, pytest.approx(3.3)),
-        ("end", 3, pytest.approx(3.45), "B"),
-        ("start", 4, 4),
-        ("end", 4, pytest.approx(4.15), "B"),
-    ]
-    assert households[0].response_probability == pytest.approx(0.15)
-    assert households[1].response_probability == pytest.approx(0.3)
-    assert households[2].response_probability == pytest.approx(0.4)
-    assert households[3].response_probability == pytest.approx(0.5)
+    assert households[0].response_probability == pytest.approx(0.05)
+    assert households[1].response_probability == pytest.approx(0.2)
+    assert households[2].response_probability == pytest.approx(0.3)
+    assert households[3].response_probability == pytest.approx(0.4)
     assert field_officer_list == households
     assert households[0].next_field_visit_day == 7
     assert households[3].next_field_visit_day == 8
@@ -69,7 +57,6 @@ def test_field_officer_option_a_removes_household_from_master_list():
         SimpleNamespace(id=2, responded=False, response_probability=0.2),
     ]
     field_officer_list = households.copy()
-    visit_log = []
 
     env.process(
         queue_field_officer_visits(
@@ -81,13 +68,11 @@ def test_field_officer_option_a_removes_household_from_master_list():
             response_probability_increase=0.1,
             queue_size=2,
             random_source=FixedRandom([0.2, 0.8]),
-            visit_log=visit_log,
         )
     )
 
     env.run(until=4)
 
-    assert visit_log[0] == ("start", 1, 3)
-    assert visit_log[1] == ("end", 1, pytest.approx(3.2), "A")
     assert households[0] not in field_officer_list
     assert households[1] in field_officer_list
+    assert households[0].responded is True

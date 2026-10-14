@@ -40,7 +40,7 @@ env.process(hh.first_day_responses(env, hh_list, rng))
 env.process(hh.daily_response_updates(env, hh_list, rng))
 env.process(sms.sms_day_n_increase_baseline(env, intervention_lists.sms_list, sms_timing))
 env.process(out.daily_response_totals(env, hh_list))
-env.process(hh.populate_sms_list(env, hh_list, intervention_lists.sms_list))
+env.process(sms.populate_sms_list(env, hh_list, intervention_lists.sms_list))
 env.process(field.populate_field_officer_list(env, hh_list, intervention_lists.field_officer_list))
 env.process(
 	field.queue_field_officer_visits(

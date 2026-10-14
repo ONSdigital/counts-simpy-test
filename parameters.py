@@ -25,4 +25,3 @@ baseline_parameters = SimulationParameters()
 #setup example new parameters. No need to make new from scratch, just replace the values you want to change
 new_scenario_parameters = dc.replace(baseline_parameters, scenario_name = "new_scenario", num_households = 20)
 
-print(baseline_parameters)

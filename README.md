@@ -1,2 +1,8 @@
-To test github functionality and how it integrates with VScode
-+ to test SimPy (before access to Google Cloud Platform)
+#COUNTS
+SimPy implementation of COUNTS
+
+simulation.py runs the simulation
+parameters.py hold the information to feed into the simulation, various probabilities, number of households, etc...
+functions contains the 'rules' of the simulation. 
+
+tests is currently WIP; it is wholly ai generated and has not been reviewed. 

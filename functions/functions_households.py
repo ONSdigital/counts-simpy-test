@@ -34,16 +34,11 @@ def first_day_responses(env, households, rng):
             household.responded = True
             print(f"Household {household.id} responded on the first day")
 
-def populate_sms_list(env, households, sms_list):
-    yield env.timeout(0.1)
-    for household in households:
-        if household.sms_available and not household.responded:
-            sms_list.append(household)
-        
 
+    
 #event to update houses daily with their latest probability of responding from end of day one onwards
 def daily_response_updates(env, households, rng):
-    yield env.timeout(2.5)
+    yield env.timeout(1.5)
     while True:
         for household in households:
             if household.responded is False:
