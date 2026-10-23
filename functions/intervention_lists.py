@@ -1,7 +1,9 @@
-#class to hold the various intervention lists
 class intervention_lists:
-    #define the empty lists 
+    """Store the mutable intervention lists used during a simulation run."""
+
     def __init__(self):
+        """Initialise empty intervention lists for each intervention type."""
+
         self.sms_list = []
         self.field_officer_list = []
-        self.postcard_list = []
+        self.reminder_card_list = []
