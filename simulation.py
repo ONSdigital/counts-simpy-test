@@ -5,7 +5,7 @@ import simpy
 
 import functions.functions_contact_centre as cc
 import functions.functions_output as out
-from function_core import build_unit
+from functions.function_core import build_unit
 
 
 #import scenario parameters

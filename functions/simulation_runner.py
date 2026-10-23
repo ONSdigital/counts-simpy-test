@@ -5,10 +5,10 @@ import simpy
 
 import functions.functions_contact_centre as cc
 import functions.functions_output as out
-from function_core import build_unit
+from functions.function_core import build_unit
 from parameters import SimulationParameters
 from parameters import baseline_parameters
-from simulation_types import UnitState
+from functions.simulation_types import UnitState
 
 
 @dc.dataclass

@@ -5,7 +5,7 @@ import streamlit as st
 
 import functions.functions_output as out
 from parameters import baseline_parameters
-from simulation_runner import run_simulation
+from functions.simulation_runner import run_simulation
 
 
 st.set_page_config(page_title="Counts SimPy Runner", layout="wide")

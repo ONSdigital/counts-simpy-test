@@ -5,7 +5,7 @@ import functions.functions_households as hh
 import functions.functions_output as out
 import functions.functions_sms as sms
 import functions.intervention_lists as il
-from simulation_types import UnitState
+from functions.simulation_types import UnitState
 
 
 def build_unit(
