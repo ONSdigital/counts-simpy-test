@@ -120,6 +120,14 @@ What happens:
 - A plot is generated and saved as `household_returns.png`.
 
 
+## Local Map Data
+
+The `LA_maps/` and `LSOA_maps/` folders contain local map datasets and are
+excluded from Git. Cloning this repository does not download these datasets.
+Supply them separately in those folders if you need the map visualisation,
+keeping each shapefile and its companion files together.
+
+
 ## Changing Scenario Settings
 
 - Default scenario values are in `parameters.py`.
@@ -141,4 +149,3 @@ What happens:
 ## Documentation
 
 For a fuller reference, see `docs/project_reference.rst`.
-

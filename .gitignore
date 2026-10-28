@@ -39,3 +39,7 @@ Desktop.ini
 # Local environment files
 .env
 .env.*
+
+# Local map datasets
+/LA_maps/
+/LSOA_maps/
