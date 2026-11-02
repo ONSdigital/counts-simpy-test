@@ -137,6 +137,47 @@ keeping each shapefile and its companion files together.
 - For script-based runs, edit values in `parameters.py` before running.
 - For app-based runs, use the sidebar controls at runtime.
 
+### Daily Field Visits
+
+`daily_field_visits` sets the maximum visits completed per officer each day
+(default 30). All visits happen at the same simulated time on each day from
+`field_first_day` through `field_last_day`, inclusive. There is no visit duration
+or spillover into later days. Fewer visits occur when fewer households are
+eligible; revisit waiting periods still apply. Set the value to 0 to disable
+visits. This replaces `field_visit_duration` and `field_daily_queue_size`.
+
+### Daily Response Probabilities
+
+`daily_response_probabilities_by_group` supplies exactly 50 baseline
+probabilities for each of `A`, `B` and `C`. Values must be between 0 and 1.
+Index 0 is day 1, index 49 is day 50. For example:
+
+```python
+daily_response_probabilities_by_group={
+	"A": [0.05, 0.04] + [0.03] * 48,
+	"B": [0.08, 0.06] + [0.04] * 48,
+	"C": [0.03, 0.02] + [0.01] * 48,
+}
+```
+
+The defaults are a flat 0.05 for every group and day. There is no automatic
+daily decay. Interventions never modify the baseline table or add to daily
+response probabilities. Instead, SMS makes one response attempt per eligible
+household with probability `sms_response_probability` (default 0.3). Eligible
+field visits make one response attempt with probability
+`field_visit_response_probability_if_answer` (default 0.5) when there is no
+doorstep completion or paper order, or
+`field_visit_response_probability_if_no_answer` (default 0.2) when there is no
+answer and the household is not vacant. Each attempt either records an
+immediate return or has no lasting effect; a later visit can make a new attempt.
+Already-responded or refusing households cannot respond through these attempts.
+Paper-first households cannot respond through SMS, these field attempts, or
+ordinary daily returns until paper arrives. Doorstep completion and paper
+ordering remain separate field outcomes. The time-zero response uses the
+first value in the household's group table, with no separate first-day setting.
+The timing and indexing of subsequent daily draws are unchanged. Runs beyond day 50
+retain the day-50 baseline. In the app, edit the 50-row table in the sidebar.
+
 
 ## Troubleshooting
 

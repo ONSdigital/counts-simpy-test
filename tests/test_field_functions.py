@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import simpy
 
 from functions.functions_contact_centre import PaperQuestionnaireService
@@ -72,6 +73,7 @@ def test_queue_field_officer_visits_schedules_visit_within_active_window():
     household = SimpleNamespace(
         id=12,
         responded=False,
+        refusal=False,
         paper_first=False,
         waiting_for_pq=False,
         response_probability=0.1,
@@ -102,11 +104,10 @@ def test_queue_field_officer_visits_schedules_visit_within_active_window():
             field_officer_list,
             first_day=1,
             last_day=1,
-            visit_duration=0.1,
-            response_probability_increase_if_answer=0.2,
-            response_probability_increase_if_no_answer=0.1,
-            queue_size=1,
-            random_source=SequenceRandom([0.9, 0.9]),
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.1,
+            daily_field_visits=1,
+            random_source=SequenceRandom([0.9, 0.9, 0.9]),
             answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
@@ -131,6 +132,63 @@ def test_end_of_day_remove_responded_houses_filters_list_after_first_day():
 
     assert responded_household not in field_officer_list
     assert open_household in field_officer_list
+
+
+@pytest.mark.parametrize("daily_field_visits", [0, 2])
+def test_daily_visit_batches_finish_at_one_timestamp_and_respect_daily_limit(daily_field_visits):
+    env = simpy.Environment()
+    draw_times = []
+
+    class TimedRandom:
+        def random(self):
+            draw_times.append(env.now)
+            return 0.9
+
+    households = [
+        SimpleNamespace(
+            id=household_id,
+            responded=False,
+            paper_first=True,
+            waiting_for_pq=False,
+            next_field_visit_day=0,
+            field_knocks=0,
+        )
+        for household_id in range(5)
+    ]
+    intervention_lists = SimpleNamespace(
+        sms_list=[],
+        field_officer_list=list(households),
+        reminder_card_list=[],
+    )
+    env.process(
+        queue_field_officer_visits(
+            env,
+            create_field_officer(env),
+            households,
+            intervention_lists,
+            intervention_lists.field_officer_list,
+            first_day=3,
+            last_day=4,
+            daily_field_visits=daily_field_visits,
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.2,
+            random_source=TimedRandom(),
+            answer_door_probability=0.5,
+            doorstep_completion_probability=0.5,
+            vacancy_probability_if_no_answer=0.1,
+            days_until_next_visit=3,
+            paper_questionnaire_service=PaperQuestionnaireService(10, 2, 1),
+        )
+    )
+
+    env.run(until=2.9)
+    assert sum(household.field_knocks for household in households) == 0
+    env.run(until=3.001)
+    assert sum(household.field_knocks for household in households) == daily_field_visits
+    assert draw_times == [3] * (2 * daily_field_visits)
+    env.run(until=5)
+    assert sum(household.field_knocks for household in households) == 2 * daily_field_visits
+    assert draw_times == [3] * (2 * daily_field_visits) + [4] * (2 * daily_field_visits)
 
 
 def test_vacant_household_is_removed_from_population_and_all_lists():
@@ -159,14 +217,13 @@ def test_vacant_household_is_removed_from_population_and_all_lists():
             intervention_lists,
             intervention_lists.field_officer_list,
             household,
-            visit_duration=0.1,
             random_source=SequenceRandom([0.9, 0.05]),
             answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=4,
-            response_probability_increase_if_answer=0.2,
-            response_probability_increase_if_no_answer=0.2,
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.2,
             paper_questionnaire_service=paper_questionnaire_service,
         )
     )
@@ -213,14 +270,13 @@ def test_no_answer_non_vacant_household_is_scheduled_for_revisit():
             intervention_lists,
             intervention_lists.field_officer_list,
             household,
-            visit_duration=0.1,
             random_source=SequenceRandom([0.9, 0.9, 0.9]),
             answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=6,
-            response_probability_increase_if_answer=0.2,
-            response_probability_increase_if_no_answer=0.2,
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.2,
             paper_questionnaire_service=paper_questionnaire_service,
         )
     )
@@ -230,6 +286,7 @@ def test_no_answer_non_vacant_household_is_scheduled_for_revisit():
     assert household.responded is False
     assert household.next_field_visit_day == 6
     assert household.waiting_for_pq is False
+    assert household.response_probability == 0.05
 
 
 def test_answer_door_keeps_outcome_a_behaviour():
@@ -266,14 +323,13 @@ def test_answer_door_keeps_outcome_a_behaviour():
             intervention_lists,
             intervention_lists.field_officer_list,
             household,
-            visit_duration=0.1,
             random_source=SequenceRandom([0.1, 0.1]),
             answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=4,
-            response_probability_increase_if_answer=0.2,
-            response_probability_increase_if_no_answer=0.2,
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.2,
             paper_questionnaire_service=paper_questionnaire_service,
         )
     )
@@ -318,14 +374,13 @@ def test_answer_no_completion_orders_pq_when_paper_first_and_not_waiting():
             intervention_lists,
             intervention_lists.field_officer_list,
             household,
-            visit_duration=0.1,
             random_source=SequenceRandom([0.1, 0.9]),
             answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=5,
-            response_probability_increase_if_answer=0.2,
-            response_probability_increase_if_no_answer=0.2,
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.2,
             paper_questionnaire_service=paper_questionnaire_service,
         )
     )
@@ -337,14 +392,16 @@ def test_answer_no_completion_orders_pq_when_paper_first_and_not_waiting():
     assert household.field_knocks == 1
 
 
-def test_answer_no_completion_increases_response_probability_when_no_pq_order():
-    # This test checks that answered-door households not requiring paper orders receive the configured response-probability boost.
+@pytest.mark.parametrize("answered", [True, False])
+@pytest.mark.parametrize("response_draw, succeeds", [(0.1, True), (0.9, False)])
+def test_field_response_attempt_does_not_change_baseline(answered, response_draw, succeeds):
     env = simpy.Environment()
     field_officer = simpy.Resource(env, capacity=1)
 
     household = SimpleNamespace(
         id=5,
         responded=False,
+        refusal=False,
         paper_first=False,
         waiting_for_pq=False,
         response_probability=0.05,
@@ -353,7 +410,7 @@ def test_answer_no_completion_increases_response_probability_when_no_pq_order():
     )
     households = [household]
     intervention_lists = SimpleNamespace(
-        sms_list=[],
+        sms_list=[household],
         field_officer_list=[household],
         reminder_card_list=[],
     )
@@ -371,20 +428,24 @@ def test_answer_no_completion_increases_response_probability_when_no_pq_order():
             intervention_lists,
             intervention_lists.field_officer_list,
             household,
-            visit_duration=0.1,
-            random_source=SequenceRandom([0.1, 0.9]),
+            random_source=SequenceRandom([0.1 if answered else 0.9, 0.9, response_draw]),
             answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=5,
-            response_probability_increase_if_answer=0.2,
-            response_probability_increase_if_no_answer=0.2,
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.2,
             paper_questionnaire_service=paper_questionnaire_service,
         )
     )
     env.run(until=1)
 
-    assert household.response_probability == 0.25
+    assert household.response_probability == 0.05
+    assert household.responded is succeeds
+    assert (household in households) is not succeeds
+    assert (household in intervention_lists.field_officer_list) is not succeeds
+    assert (household in intervention_lists.sms_list) is not succeeds
+    assert household.doorstep_completions == 0
     assert household.next_field_visit_day == 5
     assert household.field_knocks == 1
 
@@ -424,14 +485,13 @@ def test_answering_door_while_waiting_for_pq_increments_next_visit_day():
             intervention_lists,
             intervention_lists.field_officer_list,
             household,
-            visit_duration=0.1,
             random_source=SequenceRandom([0.1]),
             answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=5,
-            response_probability_increase_if_answer=0.2,
-            response_probability_increase_if_no_answer=0.2,
+            response_probability_if_answer=0.2,
+            response_probability_if_no_answer=0.2,
             paper_questionnaire_service=paper_questionnaire_service,
         )
     )
@@ -462,3 +522,41 @@ def test_populate_field_officer_list_only_adds_households_when_knocks_are_at_or_
     assert len(field_officer_list) == 2
     assert households[1] in field_officer_list
     assert households[2] in field_officer_list
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, True])
+def test_daily_field_visits_must_be_a_non_negative_integer(value):
+    from parameters import SimulationParameters
+
+    with pytest.raises(ValueError, match="daily_field_visits"):
+        SimulationParameters(daily_field_visits=value)
+
+
+@pytest.mark.parametrize("daily_field_visits", [0, 2])
+def test_simulation_applies_daily_visit_allowance_per_officer(daily_field_visits):
+    import dataclasses as dc
+
+    from functions.simulation_runner import run_simulation
+    from parameters import baseline_parameters
+
+    params = dc.replace(
+        baseline_parameters,
+        num_households=20,
+        num_field_officers=2,
+        daily_field_visits=daily_field_visits,
+        field_first_day=3,
+        field_last_day=4,
+        daily_response_probabilities_by_group={group: [0.0] * 50 for group in ("A", "B", "C")},
+        paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
+        sms_timing=100,
+        field_answer_door_probability=0.0,
+        field_vacancy_probability_if_no_answer=0.0,
+        field_visit_response_probability_if_no_answer=0.0,
+        field_days_until_next_visit=3,
+    )
+
+    result = run_simulation(params, run_until=6, generate_plot=False)
+
+    assert len(result.units) == 2
+    for unit in result.units:
+        assert sum(household.field_knocks for household in unit.households) == 2 * daily_field_visits

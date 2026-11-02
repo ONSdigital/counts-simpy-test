@@ -30,6 +30,12 @@ with st.sidebar:
         value=base_params.num_field_officers,
         step=1,
     )
+    daily_field_visits = st.number_input(
+        "Daily field visits per officer",
+        min_value=0,
+        value=base_params.daily_field_visits,
+        step=1,
+    )
     field_first_day = st.number_input(
         "Field operations first day",
         min_value=1,
@@ -51,29 +57,29 @@ with st.sidebar:
         value=base_params.sms_timing,
         step=1,
     )
-    first_day_probability = st.slider(
-        "First day response",
-        min_value=0.0,
-        max_value=1.0,
-        value=float(base_params.first_day_probability),
-        step=0.01,
-    )
-    baseline_response_probability = st.slider(
-        "Initial daily response rate",
-        min_value=0.0,
-        max_value=1.0,
-        value=float(base_params.baseline_response_probability),
-        step=0.01,
-    )
-    daily_percentage_response_decrease = st.slider(
-        "Waning percentage",
-        min_value=0.0,
-        max_value=1.0,
-        value=float(base_params.daily_percentage_response_decrease),
-        step=0.01,
+    st.subheader("Daily baseline probabilities")
+    daily_probability_table = st.data_editor(
+        {
+            "Day": list(range(1, 51)),
+            **base_params.daily_response_probabilities_by_group,
+        },
+        disabled=["Day"],
+        hide_index=True,
+        column_config={
+            group: st.column_config.NumberColumn(
+                group,
+                min_value=0.0,
+                max_value=1.0,
+                step=0.001,
+                format="%.4f",
+                required=True,
+            )
+            for group in ("A", "B", "C")
+        },
+        key="daily_probability_table",
     )
     sms_response_probability = st.slider(
-        "SMS probability boost",
+        "SMS response probability",
         min_value=0.0,
         max_value=1.0,
         value=float(base_params.sms_response_probability),
@@ -103,12 +109,14 @@ elif run_clicked:
         base_params,
         num_households=num_households,
         num_field_officers=num_field_officers,
+        daily_field_visits=daily_field_visits,
         field_first_day=field_first_day,
         field_last_day=field_last_day,
         sms_timing=sms_timing,
-        first_day_probability=first_day_probability,
-        baseline_response_probability=baseline_response_probability,
-        daily_percentage_response_decrease=daily_percentage_response_decrease,
+        daily_response_probabilities_by_group={
+            group: list(daily_probability_table[group])
+            for group in ("A", "B", "C")
+        },
         sms_response_probability=sms_response_probability,
         field_doorstep_completion_probability=field_doorstep_completion_probability,
     )

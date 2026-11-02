@@ -91,7 +91,7 @@ The model runs on a SimPy environment. A typical run follows this high-level flo
 
    * first-day responses,
    * daily household response updates,
-   * SMS list population and SMS probability boosts,
+   * SMS list population and one-off SMS response attempts,
    * field-officer list population and visit scheduling,
    * response-history collection for plotting.
 
@@ -190,14 +190,26 @@ Important parameters include:
 ``num_households``
    Number of households generated for the run.
 
-``baseline_response_probability``
-   Daily probability of response for households that have not yet responded.
-
-``first_day_probability``
-   Probability of an immediate first-day response.
+``daily_response_probabilities_by_group``
+   A dictionary containing 50 daily baseline probabilities for each of A, B
+   and C. Index 0 is day 1 and index 49 is day 50. Longer runs retain the last
+   value. There is no automatic decay; interventions make separate one-off
+   response attempts without changing the table. Defaults are 0.05 for all groups and days.
+   Each group's first value also sets its time-zero response probability.
 
 ``sms_timing``
-   Simulation day on which SMS probability boosts are applied.
+   Simulation day on which the one-off SMS response attempts occur.
+
+``sms_response_probability``
+   One-off probability of responding to SMS (default 0.3).
+
+``field_visit_response_probability_if_answer``
+   One-off probability of responding after an answered visit with no doorstep
+   completion or paper order (default 0.5).
+
+``field_visit_response_probability_if_no_answer``
+   One-off probability of responding after an unanswered, non-vacant visit
+   (default 0.2). Paper-first and refusing households cannot use this route.
 
 ``field_first_day``
    Simulation day on which field operations begin.
@@ -205,8 +217,11 @@ Important parameters include:
 ``field_last_day``
    Final simulation day on which field operations are active.
 
-``field_daily_queue_size``
-   Maximum number of households moved into the daily field-visit queue.
+``daily_field_visits``
+   Maximum visits completed per officer each day (default 30). Each day's
+   visits complete at the same simulated time, with no visit duration or
+   spillover. Fewer visits occur when fewer households are eligible. Zero
+   disables visits.
 
 ``field_doorstep_completion_probability``
    Probability that a household completes at the doorstep when the door is
@@ -225,7 +240,7 @@ Module And API Reference
    run. It provides a simple way to create scenario variants without changing the
    rest of the simulation wiring.
 
-   Attributes include response probabilities, intervention timings, queue sizes,
+   Attributes include response probabilities, intervention timings, daily visit limits,
    and the random seed.
 
 ``baseline_parameters``
@@ -239,7 +254,7 @@ Module And API Reference
 ``functions.functions_households`` module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. py:class:: Household(id, rng, baseline_response_probability, first_day_probability)
+.. py:class:: Household(id, rng, baseline_response_probability, paper_first_probability_by_group)
 
    Represents a single household in the simulation.
 
@@ -256,7 +271,7 @@ Module And API Reference
 
    SimPy process that applies one-off first-day responses at simulation time
    ``t = 0``. Each household is marked as responded if a random draw falls below
-   its ``first_day_probability``.
+   its initial ``response_probability``, set from the first value in its group table.
 
 .. py:function:: daily_response_updates(env, households, rng)
 
@@ -268,14 +283,13 @@ Module And API Reference
 ``functions.functions_sms`` module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. py:function:: sms_day_n_increase_baseline(env, sms_list, n)
+.. py:function:: sms_day_n_responses(env, sms_list, n, sms_response_probability, rng, open_households=None)
 
-   SimPy process that waits until day ``n`` and then increases the response
-   probability for each household currently in ``sms_list``. After a short delay,
-   it removes households that have already responded.
-
-   Note that the current probability increase is implemented as a fixed ``+0.1``
-   inside the function.
+   SimPy process that waits until time ``n + 0.85`` and makes a single response
+   draw for each active, outstanding, non-refusing, non-paper-first household
+   in ``sms_list``. Success records an immediate return and removes the household
+   from the open list. Failure has no lasting effect on daily probabilities.
+   After a short delay, responded households are removed from ``sms_list``.
 
 .. py:function:: populate_sms_list(env, households, sms_list)
 
@@ -296,23 +310,21 @@ Module And API Reference
    SimPy process that runs shortly after first-day responses and adds eligible,
    non-responding households to the field-officer candidate list.
 
-.. py:function:: queue_field_officer_visits(env, field_officer, field_officer_list, start_day, visit_duration, response_probability_increase, queue_size, random_source)
+.. py:function:: queue_field_officer_visits(env, field_officer, open_households, intervention_lists, field_officer_list, first_day, last_day, response_probability_if_answer, response_probability_if_no_answer, daily_field_visits, random_source, answer_door_probability, doorstep_completion_probability, vacancy_probability_if_no_answer, days_until_next_visit, paper_questionnaire_service)
 
-   SimPy process that starts just before the configured visit day, builds a daily
-   queue from the field-officer list, and launches a visit process for each chosen
-   household.
+   SimPy process that runs on each integer day from ``first_day`` through
+   ``last_day``, inclusive. It selects up to ``daily_field_visits`` eligible
+   households per officer and completes all selected visits at that timestamp.
 
    The queue currently filters to households that have not responded and are not
    waiting for a later revisit day.
 
-.. py:function:: field_officer_visit(env, field_officer, field_officer_list, household, visit_duration, random_source)
+.. py:function:: field_officer_visit(env, field_officer, open_households, intervention_lists, field_officer_list, household, random_source, answer_door_probability, doorstep_completion_probability, vacancy_probability_if_no_answer, days_until_next_visit, response_probability_if_answer, response_probability_if_no_answer, paper_questionnaire_service)
 
    SimPy process for a single field visit. It requests field-officer capacity,
-   waits for the visit duration, and then either marks the household as responded
-   or schedules a future revisit.
-
-   In the current implementation, the visit outcome is determined by a fixed
-   50 percent random draw.
+   then handles the visit without advancing simulation time. Configured
+   probabilities determine door answering, doorstep completion, vacancy and
+   one-off returns; other outcomes include paper orders and future revisits.
 
 .. py:function:: end_of_day_remove_responded_houses(env, field_officer_list, start_date)
 

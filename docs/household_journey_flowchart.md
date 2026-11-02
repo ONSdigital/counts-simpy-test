@@ -8,30 +8,33 @@ flowchart TD
 
     B --> B1{"responded=False<br/>refusal=False<br/>paper_first=False?"}
     B1 -- No --> P
-    B1 -- Yes --> B2{"rand < first_day_probability?"}
+    B1 -- Yes --> B2{"rand < first group-table value?"}
     B2 -- Yes --> B3["responded=True"]
     B2 -- No --> P
     B3 --> P
 
     P["Parallel processes"] --> S0["t=0.1<br/>Populate sms_list (once)"]
-    S0 --> S1{"Current code rule:<br/>sms_available=False<br/>and responded=False?"}
+    S0 --> S1{"sms_available=True<br/>and responded=False?"}
     S1 -- Yes --> S2["Add to sms_list"]
     S1 -- No --> S3["Do not add"]
 
-    S2 --> S4["t=sms_timing+0.85<br/>SMS send<br/>response_probability += sms uplift"]
+    S2 --> S4["t=sms_timing+0.85<br/>SMS send"]
     S3 --> S4
-    S4 --> S5["t=sms_timing+1.45<br/>Keep only not responded<br/>in sms_list"]
+    S4 --> S6{"Listed, active, not responded,<br/>not refusing, not paper-first?"}
+    S6 -- Yes --> S7{"rand < sms_response_probability?"}
+    S7 -- Yes --> S8["responded=True<br/>remove from open households"]
+    S6 -- No --> S5
+    S7 -- No --> S5
+    S8 --> S5["t=sms_timing+1.45<br/>Keep only not responded<br/>in sms_list"]
 
     P --> D0["t=1.8, 2.8, 3.8...<br/>Daily response loop"]
-    D0 --> D1{"responded=False<br/>refusal=False<br/>paper_first=False?"}
+    D0 --> D4["Read group/day baseline table<br/>days after 50 use day 50<br/>no intervention carryover"]
+    D4 --> D1{"is_active=True<br/>responded=False<br/>refusal=False<br/>paper_first=False?"}
     D1 -- Yes --> D2{"rand < response_probability?"}
     D2 -- Yes --> D3["responded=True"]
-    D2 -- No --> D4
-    D1 -- No --> D4
-    D3 --> D4{"is_active=True<br/>and responded=False?"}
-    D4 -- Yes --> D5["response_probability *=<br/>(1-daily decrease)"]
-    D4 -- No --> D0
-    D5 --> D0
+    D2 -- No --> D0
+    D1 -- No --> D0
+    D3 --> D0
 
     P --> C0["t=1.85 then daily<br/>Call-centre loop"]
     C0 --> C1{"is_active & paper_first<br/>not responded<br/>not waiting_for_pq?"}
@@ -52,11 +55,11 @@ flowchart TD
     F1 -- No --> F0
     F2 --> F0
 
-    P --> Q0["Queue starts at<br/>t=field_visit_day-0.4"]
-    Q0 --> Q1["Each day:<br/>target_day=int(now+0.4)<br/>Queue where responded=False<br/>and next_field_visit_day<=target_day<br/>limit=field_daily_queue_size"]
-    Q1 --> Q2["wait 0.4<br/>launch visits<br/>wait 0.6"]
+    P --> Q0["Visit days:<br/>field_first_day through field_last_day"]
+    Q0 --> Q1["Each day:<br/>select where responded=False<br/>and next_field_visit_day<=today<br/>limit=daily_field_visits per officer"]
+    Q1 --> Q2["Complete all selected visits<br/>at the same timestamp<br/>repeat next day"]
 
-    Q2 --> V0["Visit:<br/>request resource<br/>wait visit_duration<br/>field_knocks += 1"]
+    Q2 --> V0["Visit:<br/>no elapsed time<br/>field_knocks += 1"]
     V0 --> V1{"Answer door?"}
 
     V1 -- Yes --> V2{"waiting_for_pq?"}
@@ -65,16 +68,20 @@ flowchart TD
     V4 -- Yes --> V5["responded=True<br/>remove from field list"]
     V4 -- No --> V6{"paper_first and<br/>not waiting_for_pq?"}
     V6 -- Yes --> V7["Order PQ<br/>waiting_for_pq=True"]
-    V6 -- No --> V8["response_probability +=<br/>field boost"]
+    V6 -- No --> V8{"not refusing and rand <br/>response_probability_if_answer?"}
     V7 --> V9["next_field_visit_day =<br/>int(now)+days_until_next_visit"]
-    V8 --> V9
+    V8 -- No --> V9
+    V8 -- Yes --> V14["responded=True<br/>remove from open households<br/>and intervention lists"]
+    V14 --> Q0
     V3 --> Q0
     V5 --> Q0
     V9 --> Q0
 
     V1 -- No --> V10{"Vacant on no-answer?"}
     V10 -- Yes --> V11["Set is_active=False<br/>waiting_for_pq=False<br/>remove from households<br/>remove from all lists"]
-    V10 -- No --> V12["next_field_visit_day =<br/>int(now)+days_until_next_visit"]
+    V10 -- No --> V13{"not paper-first, not refusing<br/>and rand < response_probability_if_no_answer?"}
+    V13 -- Yes --> V14
+    V13 -- No --> V12["next_field_visit_day =<br/>int(now)+days_until_next_visit"]
     V11 --> Q0
     V12 --> Q0
 

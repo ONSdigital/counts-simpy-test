@@ -65,10 +65,9 @@ def queue_field_officer_visits(
     field_officer_list,
     first_day,
     last_day,
-    visit_duration,
-    response_probability_increase_if_answer,
-    response_probability_increase_if_no_answer,
-    queue_size,
+    response_probability_if_answer,
+    response_probability_if_no_answer,
+    daily_field_visits,
     random_source,
     answer_door_probability,
     doorstep_completion_probability,
@@ -76,7 +75,7 @@ def queue_field_officer_visits(
     days_until_next_visit,
     paper_questionnaire_service,
 ):
-    """Build and process the daily queue of field-officer visits.
+    """Complete a limited batch of visits at the same time each field day.
 
     Args:
         env: SimPy environment.
@@ -86,14 +85,11 @@ def queue_field_officer_visits(
         field_officer_list: Mutable list of households eligible for visits.
         first_day: First simulation day on which visits are launched.
         last_day: Last simulation day on which visits are launched.
-        visit_duration: Duration of a single visit.
-        response_probability_increase_if_answer: Increase to household response
-            probability when the household answers the door but does not
-            complete and no pQ order occurs.
-        response_probability_increase_if_no_answer: Increase to household
-            response probability when there is no answer and the household is
-            not marked vacant.
-        queue_size: Maximum number of households queued per day.
+        response_probability_if_answer: One-off response probability when the
+            household answers but does not complete and no pQ order occurs.
+        response_probability_if_no_answer: One-off response probability when
+            there is no answer and the household is not marked vacant.
+        daily_field_visits: Maximum visits completed per officer each day.
         random_source: Random number generator used by visit processes.
         answer_door_probability: Probability household answers the door.
         doorstep_completion_probability: Probability of completing at the door
@@ -106,24 +102,17 @@ def queue_field_officer_visits(
             for ordering and dispatch delays.
 
     Yields:
-        SimPy timeout events that step through queue creation and daily visits.
+        SimPy timeout events that advance between daily batches.
     """
 
-    yield env.timeout(max(first_day - 0.4, 0))
-
-    while True:
-        target_day = int(env.now + 0.4)
-        if target_day > last_day:
-            break
-
+    yield env.timeout(first_day)
+    for target_day in range(first_day, last_day + 1):
         daily_queue = [
             household
             for household in field_officer_list
             if not household.responded
             and household.next_field_visit_day <= target_day
-        ][:queue_size]
-
-        yield env.timeout(0.4)
+        ][:daily_field_visits]
 
         for household in daily_queue:
             env.process(
@@ -134,19 +123,17 @@ def queue_field_officer_visits(
                     intervention_lists,
                     field_officer_list,
                     household,
-                    visit_duration,
                     random_source,
                     answer_door_probability,
                     doorstep_completion_probability,
                     vacancy_probability_if_no_answer,
                     days_until_next_visit,
-                    response_probability_increase_if_answer,
-                    response_probability_increase_if_no_answer,
+                    response_probability_if_answer,
+                    response_probability_if_no_answer,
                     paper_questionnaire_service,
                 )
             )
-            yield env.timeout(0)
-        yield env.timeout(0.6)
+        yield env.timeout(1)
 
 def field_officer_visit(
     env: simpy.Environment,
@@ -155,17 +142,16 @@ def field_officer_visit(
     intervention_lists,
     field_officer_list,
     household,
-    visit_duration: float,
     random_source,
     answer_door_probability,
     doorstep_completion_probability,
     vacancy_probability_if_no_answer,
     days_until_next_visit,
-    response_probability_increase_if_answer,
-    response_probability_increase_if_no_answer,
+    response_probability_if_answer,
+    response_probability_if_no_answer,
     paper_questionnaire_service,
 ):
-    """Run a single field-officer visit for one household.
+    """Complete a field-officer visit without advancing simulation time.
 
     Args:
         env: SimPy environment.
@@ -174,7 +160,6 @@ def field_officer_visit(
         intervention_lists: Object containing all intervention lists.
         field_officer_list: Mutable list of households eligible for visits.
         household: Household being visited.
-        visit_duration: Duration of the visit in simulation time.
         random_source: Random number generator used to determine the outcome.
         answer_door_probability: Probability household answers the door.
         doorstep_completion_probability: Probability of completing at the door
@@ -183,26 +168,24 @@ def field_officer_visit(
             vacant.
         days_until_next_visit: Days until next visit when no answer and not
             vacant.
-        response_probability_increase_if_answer: Increase to household
-            response probability when answered-door contact does not lead to
-            doorstep completion and no pQ order occurs.
-        response_probability_increase_if_no_answer: Increase to household
-            response probability when there is no answer and the household is
-            not marked vacant.
+        response_probability_if_answer: One-off response probability when
+            answered-door contact does not lead to doorstep completion or a pQ order.
+        response_probability_if_no_answer: One-off response probability when
+            there is no answer and the household is not marked vacant.
         paper_questionnaire_service: Shared paper questionnaire service used
             for ordering and dispatch delays.
 
     Yields:
-        SimPy events for resource acquisition and visit duration.
+        SimPy resource acquisition at the current simulation time.
     """
 
 
   
     with field_officer.request() as request:
         yield request
+        if household.responded:
+            return
 
-        # print(f"Day {env.now}: field officer visiting household {household.id}")
-        yield env.timeout(visit_duration)
         household.field_knocks += 1
 
         if random_source.random() < answer_door_probability:
@@ -217,8 +200,9 @@ def field_officer_visit(
                 else:
                     if household.paper_first and not household.waiting_for_pq:
                         paper_questionnaire_service.order_paper_questionnaire(env, household)
-                    else:
-                        household.response_probability += response_probability_increase_if_answer
+                    elif not household.refusal:
+                        if random_source.random() < response_probability_if_answer:
+                            household.responded = True
                     household.next_field_visit_day = int(env.now) + days_until_next_visit
             
         else:
@@ -226,8 +210,15 @@ def field_officer_visit(
                 remove_vacant_household(household, open_households, intervention_lists)
                 
             else:
-                household.response_probability += response_probability_increase_if_no_answer
+                if not household.paper_first and not household.refusal:
+                    if random_source.random() < response_probability_if_no_answer:
+                        household.responded = True
                 household.next_field_visit_day = int(env.now) + days_until_next_visit
+
+        if household.responded:
+            remove_household_from_all_intervention_lists(household, intervention_lists)
+            if household in open_households:
+                open_households.remove(household)
                 
 
 def end_of_day_remove_responded_houses(env, field_officer_list, first_day):

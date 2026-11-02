@@ -23,12 +23,15 @@ def build_unit(
         hh.Household(
             id=household_id_start + i,
             rng=unit_rng,
-            baseline_response_probability=scenario_params.baseline_response_probability,
-            first_day_probability=scenario_params.first_day_probability,
+            baseline_response_probability=0.0,
             paper_first_probability_by_group=scenario_params.paper_first_probability_by_group,
         )
         for i in range(household_count)
     ]
+    for household in households:
+        initial_probability = scenario_params.daily_response_probabilities_by_group[household.demographic_group][0]
+        household.baseline_response_probability = initial_probability
+        household.response_probability = initial_probability
 
     unit_intervention_lists = il.intervention_lists()
     unit_field_officer = field.create_field_officer(env)
@@ -42,16 +45,18 @@ def build_unit(
             env,
             households,
             unit_rng,
-            scenario_params.daily_percentage_response_decrease,
+            scenario_params.daily_response_probabilities_by_group,
             open_households,
         )
     )
     env.process(
-        sms.sms_day_n_increase_baseline(
+        sms.sms_day_n_responses(
             env,
             unit_intervention_lists.sms_list,
             scenario_params.sms_timing,
             scenario_params.sms_response_probability,
+            unit_rng,
+            open_households,
         )
     )
     env.process(sms.populate_sms_list(env, open_households, unit_intervention_lists.sms_list))
@@ -71,10 +76,9 @@ def build_unit(
             unit_intervention_lists.field_officer_list,
             first_day=scenario_params.field_first_day,
             last_day=scenario_params.field_last_day,
-            visit_duration=scenario_params.field_visit_duration,
-            response_probability_increase_if_answer=scenario_params.field_visit_response_boost_if_answer,
-            response_probability_increase_if_no_answer=scenario_params.field_visit_response_boost_if_no_answer,
-            queue_size=scenario_params.field_daily_queue_size,
+            response_probability_if_answer=scenario_params.field_visit_response_probability_if_answer,
+            response_probability_if_no_answer=scenario_params.field_visit_response_probability_if_no_answer,
+            daily_field_visits=scenario_params.daily_field_visits,
             random_source=unit_rng,
             answer_door_probability=scenario_params.field_answer_door_probability,
             doorstep_completion_probability=scenario_params.field_doorstep_completion_probability,

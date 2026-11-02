@@ -4,9 +4,8 @@ class Household:
     Args:
         id: Unique household identifier.
         rng: Random number generator used to assign initial attributes.
-        baseline_response_probability: Daily baseline probability of response
-            after the first day.
-        first_day_probability: Probability of responding on the first day.
+        baseline_response_probability: Initial baseline probability of response,
+            also used for the time-zero response draw.
     """
 
     def __init__(
@@ -14,7 +13,6 @@ class Household:
         id,
         rng,
         baseline_response_probability,
-        first_day_probability,
         paper_first_probability_by_group,
     ):
         self.id = id
@@ -25,9 +23,8 @@ class Household:
         #is there a valid phone number for SMS messages linked to the household
         self.sms_available = rng.choice([True, False])
         #baseline probability of responding on a given day
+        self.baseline_response_probability = baseline_response_probability
         self.response_probability = baseline_response_probability
-        #probability of responding on the first day without any specific intervention
-        self.first_day_probability = first_day_probability
         #demographic groups
         self.demographic_group = rng.choice(["A", "B", "C"])
         #will the household only respond to paper questionnaire (or doorstep completion)
@@ -60,7 +57,7 @@ class Household:
         )
     
 def first_day_responses(env, households, rng, open_households=None):
-    """Apply one-off first-day responses at simulation time zero.
+    """Apply time-zero responses using each household's initial group baseline.
 
     Args:
         env: SimPy environment.
@@ -74,7 +71,7 @@ def first_day_responses(env, households, rng, open_households=None):
     yield env.timeout(0)
     for household in households:
         if household.responded is False and household.refusal is False and household.paper_first is False:
-            if rng.random()<household.first_day_probability:
+            if rng.random() < household.response_probability:
                 household.responded = True
                 # print(f"Household {household.id} responded on the first day")
 
@@ -91,7 +88,7 @@ def daily_response_updates(
     env,
     households,
     rng,
-    daily_percentage_response_decrease,
+    daily_response_probabilities_by_group,
     open_households=None,
 ):
     """Update household response status once per simulated day.
@@ -100,30 +97,31 @@ def daily_response_updates(
         env: SimPy environment.
         households: Iterable of household objects to update.
         rng: Random number generator used for daily response draws.
-        daily_percentage_response_decrease: Daily proportional decrease applied
-            to response probability.
+        daily_response_probabilities_by_group: Group-specific baseline values
+            for days 1 to 50. Later days retain the final value. Interventions
+            make separate response attempts without changing these values.
 
     Yields:
         SimPy timeout events that advance the process by one day at a time.
     """
 
     yield env.timeout(1.8)
+    day_index = 0
     while True:
         households_to_process = open_households if open_households is not None else households
         for household in list(households_to_process):
-            
+            if not household.is_active or household.responded:
+                continue
+            probabilities = daily_response_probabilities_by_group[household.demographic_group]
+            baseline_probability = probabilities[min(day_index, 49)]
+            household.baseline_response_probability = baseline_probability
+            household.response_probability = baseline_probability
+
             if household.responded is False and household.refusal is False and household.paper_first is False:
                 if rng.random() < household.response_probability:
                     household.responded = True
                     if open_households is not None and household in open_households:
                         open_households.remove(household)
 
-            if (
-                household.is_active
-                and household.responded is False
-            ):
-                household.response_probability *= max(
-                    0,
-                    1 - daily_percentage_response_decrease,
-                )
+        day_index += 1
         yield env.timeout(1)
