@@ -159,23 +159,22 @@ Run via simulation script
 What to expect
 ~~~~~~~~~~~~~~
 
-* Console output with progress updates and per-unit final return proportions.
+* Console output with progress updates, the overall result, then named regional results.
 * A matplotlib chart saved to ``household_returns.png`` showing:
 
   * overall household return proportion over time,
   * one line per demographic group,
-  * response-count labels on every 10th sampled point,
+   * named regional panels below the overall chart,
    * intervention timing markers for SMS and field operation start day.
 
 
 Configuration
 -------------
 
-Simulation settings are defined in ``parameters.py``. The main script currently
-imports ``baseline_parameters`` as ``params``. The Streamlit app also uses
-``baseline_parameters`` as its default baseline.
+Simulation settings are defined in ``parameters.py``. Both the main script
+and Streamlit app use ``baseline_parameters`` and the same simulation runner.
 
-``new_scenario_parameters`` is kept in ``parameters.py`` as an example of creating
+``PoC_parameters`` is kept in ``parameters.py`` as an example of creating
 a modified scenario with ``dataclasses.replace``.
 
 To change the scenario, either:
@@ -187,8 +186,14 @@ To change the scenario, either:
 
 Important parameters include:
 
-``num_households``
-   Number of households generated for the run.
+``regions``
+   Region-name mapping to ``RegionParameters``. Each region specifies its own
+   ``num_households``, ``num_field_officers`` and A/B/C
+   ``household_type_proportions``. Population shares must sum to 1; counts are
+   rounded using largest fractional remainders while preserving regional totals.
+   Defaults cover nine English regions plus Wales using illustrative populations.
+   All regions share one clock, call centre and paper questionnaire stock.
+   Zero officers disables regional field visits; zero households is allowed.
 
 ``daily_response_probabilities_by_group``
    A dictionary containing 50 daily baseline probabilities for each of A, B
@@ -234,6 +239,11 @@ Module And API Reference
 ``parameters`` module
 ~~~~~~~~~~~~~~~~~~~~~
 
+.. py:class:: RegionParameters
+
+   Frozen regional configuration holding household count, officer count and
+   A/B/C population shares. The national total is the sum of regional counts.
+
 .. py:class:: SimulationParameters
 
    Frozen dataclass that groups together the parameters required for a simulation
@@ -246,9 +256,21 @@ Module And API Reference
 ``baseline_parameters``
    Default parameter set.
 
-``new_scenario_parameters``
+``PoC_parameters``
    Example scenario derived from ``baseline_parameters`` using
    ``dataclasses.replace``.
+
+``functions.simulation_runner`` module
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. py:function:: run_simulation(scenario_params=baseline_parameters, run_until=50, ...)
+
+   Builds every region in one SimPy environment and registers a single global
+   call-centre process. Returns overall history and named regional histories
+   in ``result.regions``. Officer units remain internal implementation details.
+   Plots place the overall chart above named regional panels, with consistent
+   group colours. Rates are weighted by active household counts, including
+   after vacancies remove households.
 
 
 ``functions.functions_households`` module

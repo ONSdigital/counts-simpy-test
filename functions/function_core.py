@@ -5,7 +5,55 @@ import functions.functions_households as hh
 import functions.functions_output as out
 import functions.functions_sms as sms
 import functions.intervention_lists as il
-from functions.simulation_types import UnitState
+from functions.simulation_types import RegionState, UnitState
+
+
+def build_region(
+    env,
+    name,
+    region_params,
+    scenario_params,
+    unit_id_start,
+    household_id_start,
+    paper_questionnaire_service,
+):
+    """Allocate regional household groups and build internal officer units."""
+
+    expected_counts = {
+        group: region_params.num_households * share
+        for group, share in region_params.household_type_proportions.items()
+    }
+    group_counts = {group: int(count) for group, count in expected_counts.items()}
+    remainder = region_params.num_households - sum(group_counts.values())
+    ordered_groups = sorted(
+        group_counts,
+        key=lambda group: (-(expected_counts[group] - group_counts[group]), group),
+    )
+    for group in ordered_groups[:remainder]:
+        group_counts[group] += 1
+    groups = [group for group, count in group_counts.items() for _ in range(count)]
+    random.Random(scenario_params.seed + unit_id_start).shuffle(groups)
+
+    unit_count = max(region_params.num_field_officers, 1)
+    households_per_unit, household_remainder = divmod(region_params.num_households, unit_count)
+    units = []
+    offset = 0
+    for unit_index in range(unit_count):
+        household_count = households_per_unit + (unit_index < household_remainder)
+        units.append(
+            build_unit(
+                env,
+                unit_id_start + unit_index,
+                scenario_params,
+                household_count,
+                household_id_start + offset,
+                paper_questionnaire_service,
+                demographic_groups=groups[offset:offset + household_count],
+                field_enabled=region_params.num_field_officers > 0,
+            )
+        )
+        offset += household_count
+    return RegionState(name=name, units=units, return_history={})
 
 
 def build_unit(
@@ -15,6 +63,8 @@ def build_unit(
     household_count,
     household_id_start,
     paper_questionnaire_service,
+    demographic_groups=None,
+    field_enabled=True,
 ):
     """Build one independent simulation unit and register its processes."""
 
@@ -25,6 +75,7 @@ def build_unit(
             rng=unit_rng,
             baseline_response_probability=0.0,
             paper_first_probability_by_group=scenario_params.paper_first_probability_by_group,
+            demographic_group=demographic_groups[i] if demographic_groups is not None else None,
         )
         for i in range(household_count)
     ]
@@ -78,7 +129,7 @@ def build_unit(
             last_day=scenario_params.field_last_day,
             response_probability_if_answer=scenario_params.field_visit_response_probability_if_answer,
             response_probability_if_no_answer=scenario_params.field_visit_response_probability_if_no_answer,
-            daily_field_visits=scenario_params.daily_field_visits,
+            daily_field_visits=scenario_params.daily_field_visits if field_enabled else 0,
             random_source=unit_rng,
             answer_door_probability=scenario_params.field_answer_door_probability,
             doorstep_completion_probability=scenario_params.field_doorstep_completion_probability,

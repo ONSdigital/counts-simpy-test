@@ -1,16 +1,56 @@
 import dataclasses as dc
+import math
+
+
+@dc.dataclass(frozen=True)
+class RegionParameters:
+    # Total households created in this region.
+    num_households: int = 10000
+    # Officers assigned to this region; zero disables its field visits.
+    num_field_officers: int = 10
+    # Regional A/B/C population shares, summing to one; rounded to whole households.
+    household_type_proportions: dict[str, float] = dc.field(
+        default_factory=lambda: {"A": 1 / 3, "B": 1 / 3, "C": 1 / 3}
+    )
+
+    def __post_init__(self):
+        for name in ("num_households", "num_field_officers"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        shares = self.household_type_proportions
+        if set(shares) != {"A", "B", "C"}:
+            raise ValueError("Regional household shares must include exactly groups A, B and C")
+        if any(not 0 <= share <= 1 for share in shares.values()):
+            raise ValueError("Regional household shares must be between 0 and 1")
+        if not math.isclose(sum(shares.values()), 1.0, rel_tol=0, abs_tol=1e-9):
+            raise ValueError("Regional household shares must sum to 1")
 
 #define a class that holds the parameters for the simulation
 @dc.dataclass(frozen=True)
 class SimulationParameters:
-##Scenario labelling and randomness
+##Scenario labelling, randomness, and geography
     # Scenario label stored with results; does not change model behaviour.
     scenario_name: str = "baseline"
 
     # Starting seed for reproducible household and intervention random draws.
     seed: int = 1
 
-    
+ # Regional populations, officer counts and A/B/C splits; illustrative defaults only.
+    regions: dict[str, RegionParameters] = dc.field(
+        default_factory=lambda: {
+            "North East": RegionParameters(),
+            "North West": RegionParameters(),
+            "Yorkshire and the Humber": RegionParameters(),
+            "East Midlands": RegionParameters(),
+            "West Midlands": RegionParameters(),
+            "East of England": RegionParameters(),
+            "London": RegionParameters(num_households = 10000, num_field_officers = 50, household_type_proportions={"A": 0.9, "B": 0.1, "C": 0}),
+            "South East": RegionParameters(),
+            "South West": RegionParameters(),
+            "Wales": RegionParameters(),
+        }
+    )
 
 ##Fixed parameters
     # Daily baseline return chances by group for days 1-50; later days use day 50.
@@ -64,11 +104,7 @@ class SimulationParameters:
     
 
 ##Variable parameters
-    # Total households created and divided between field officers.
-    num_households: int = 10000
-
-    # Number of officers, each serving its own separate household population.
-    num_field_officers: int = 10
+   
 
     # Day of the single SMS send, late in the simulated day.
     sms_timing: int = 20
@@ -103,6 +139,13 @@ class SimulationParameters:
     )
 
     def __post_init__(self):
+        if not self.regions:
+            raise ValueError("At least one region must be configured")
+        for name, region in self.regions.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Each region must have a non-empty name")
+            if not isinstance(region, RegionParameters):
+                raise ValueError("Each region must contain RegionParameters")
         if (
             isinstance(self.daily_field_visits, bool)
             or not isinstance(self.daily_field_visits, int)

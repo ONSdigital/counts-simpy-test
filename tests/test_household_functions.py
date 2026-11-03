@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 import simpy
 
+from parameters import RegionParameters
 from functions.functions_households import Household
 from functions.functions_households import first_day_responses
 from functions.functions_households import daily_response_updates
@@ -240,8 +241,7 @@ def test_interventions_return_households_without_changing_baseline_tables(interv
     original_probabilities = copy.deepcopy(probabilities)
     params = dc.replace(
         baseline_parameters,
-        num_households=60,
-        num_field_officers=1,
+        regions={"Test region": RegionParameters(num_households=60, num_field_officers=1)},
         daily_response_probabilities_by_group=probabilities,
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
         sms_timing=0 if intervention == "sms" else 100,
@@ -276,8 +276,7 @@ def test_time_zero_responses_use_first_table_value_for_each_group():
     first_probabilities = {"A": 1.0, "B": 0.0, "C": 1.0}
     params = dc.replace(
         baseline_parameters,
-        num_households=100,
-        num_field_officers=1,
+        regions={"Test region": RegionParameters(num_households=100, num_field_officers=1)},
         daily_response_probabilities_by_group={
             group: [probability] + [1 - probability] * 49
             for group, probability in first_probabilities.items()
@@ -294,3 +293,84 @@ def test_time_zero_responses_use_first_table_value_for_each_group():
         for household in households
     )
     assert not hasattr(params, "first_day_probability")
+
+
+def test_regions_share_clock_and_use_their_own_population_and_group_splits():
+    import dataclasses as dc
+
+    from functions.simulation_runner import run_simulation
+    from parameters import RegionParameters, baseline_parameters
+
+    params = dc.replace(
+        baseline_parameters,
+        regions={
+            "North East": RegionParameters(10, 2, {"A": 1.0, "B": 0.0, "C": 0.0}),
+            "Wales": RegionParameters(6, 1, {"A": 0.0, "B": 1.0, "C": 0.0}),
+        },
+        daily_response_probabilities_by_group={"A": [1.0] * 50, "B": [0.0] * 50, "C": [0.0] * 50},
+        paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
+        field_first_day=100,
+        sms_timing=100,
+    )
+
+    result = run_simulation(params, run_until=3, generate_plot=False)
+
+    assert [region.name for region in result.regions] == ["North East", "Wales"]
+    assert [len(region.households) for region in result.regions] == [10, 6]
+    assert [len(region.units) for region in result.regions] == [2, 1]
+    assert {household.demographic_group for household in result.regions[0].households} == {"A"}
+    assert {household.demographic_group for household in result.regions[1].households} == {"B"}
+    assert all(region.return_history["time"] == [0, 1, 2] for region in result.regions)
+    assert result.aggregate_history["total_households"] == 16
+    assert result.aggregate_history["responded_count"][-1] == 10
+    assert result.aggregate_history["proportion_returned"][-1] == pytest.approx(10 / 16)
+    assert len({household.id for region in result.regions for household in region.households}) == 16
+
+
+def test_region_splits_round_to_population_and_zero_officers_disable_visits():
+    import dataclasses as dc
+    from collections import Counter
+
+    from functions.simulation_runner import run_simulation
+    from parameters import baseline_parameters
+
+    params = dc.replace(
+        baseline_parameters,
+        regions={"Wales": RegionParameters(5, 0, {"A": 0.5, "B": 0.3, "C": 0.2})},
+        daily_response_probabilities_by_group={group: [0.0] * 50 for group in ("A", "B", "C")},
+        field_first_day=3,
+    )
+    result = run_simulation(params, run_until=5, generate_plot=False)
+    repeated = run_simulation(params, run_until=5, generate_plot=False)
+    households = result.regions[0].households
+
+    assert Counter(household.demographic_group for household in households) == {"A": 3, "B": 1, "C": 1}
+    assert all(household.field_knocks == 0 for household in households)
+    assert [vars(household) for household in households] == [
+        vars(household) for household in repeated.regions[0].households
+    ]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"num_households": -1},
+        {"num_field_officers": 1.5},
+        {"household_type_proportions": {"A": 0.5, "B": 0.5}},
+        {"household_type_proportions": {"A": 0.2, "B": 0.2, "C": 0.2}},
+        {"household_type_proportions": {"A": -0.1, "B": 0.5, "C": 0.6}},
+        {"household_type_proportions": {"A": float("nan"), "B": 0.5, "C": 0.5}},
+    ],
+)
+def test_region_parameters_validate_counts_and_population_shares(kwargs):
+    with pytest.raises(ValueError):
+        RegionParameters(**kwargs)
+
+
+def test_default_regions_include_nine_english_regions_and_wales():
+    from parameters import baseline_parameters
+
+    assert set(baseline_parameters.regions) == {
+        "North East", "North West", "Yorkshire and the Humber", "East Midlands",
+        "West Midlands", "East of England", "London", "South East", "South West", "Wales",
+    }

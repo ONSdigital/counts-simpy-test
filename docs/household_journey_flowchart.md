@@ -4,6 +4,8 @@ This file stores the Mermaid source code for the household-level end-to-end mode
 
 ```mermaid
 flowchart TD
+    R["One shared SimPy clock<br/>One shared call centre and paper stock"] --> RC["For each region:<br/>allocate A/B/C household counts<br/>divide households between its officers"]
+    RC --> A
     A["t=0.0<br/>Create household<br/>hard_to_count=1..5<br/>sms_available=True/False<br/>responded=False<br/>waiting_for_pq=False<br/>is_active=True<br/>field_knocks=0<br/>next_field_visit_day=0"] --> B["t=0.0<br/>First-day check"]
 
     B --> B1{"responded=False<br/>refusal=False<br/>paper_first=False?"}

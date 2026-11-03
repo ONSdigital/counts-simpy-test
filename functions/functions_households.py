@@ -14,6 +14,7 @@ class Household:
         rng,
         baseline_response_probability,
         paper_first_probability_by_group,
+        demographic_group=None,
     ):
         self.id = id
         #has the household refused to take part
@@ -26,7 +27,9 @@ class Household:
         self.baseline_response_probability = baseline_response_probability
         self.response_probability = baseline_response_probability
         #demographic groups
-        self.demographic_group = rng.choice(["A", "B", "C"])
+        self.demographic_group = (
+            demographic_group if demographic_group is not None else rng.choice(["A", "B", "C"])
+        )
         #will the household only respond to paper questionnaire (or doorstep completion)
         paper_first_probability = paper_first_probability_by_group.get(
             self.demographic_group,

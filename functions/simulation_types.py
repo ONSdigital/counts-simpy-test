@@ -13,3 +13,14 @@ class UnitState:
     intervention_lists: il.intervention_lists
     field_officer: simpy.Resource
     return_history: dict
+
+
+@dc.dataclass
+class RegionState:
+    name: str
+    units: list[UnitState]
+    return_history: dict
+
+    @property
+    def households(self):
+        return [household for unit in self.units for household in unit.households]

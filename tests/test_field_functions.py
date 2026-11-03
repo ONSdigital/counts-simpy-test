@@ -537,12 +537,11 @@ def test_simulation_applies_daily_visit_allowance_per_officer(daily_field_visits
     import dataclasses as dc
 
     from functions.simulation_runner import run_simulation
-    from parameters import baseline_parameters
+    from parameters import RegionParameters, baseline_parameters
 
     params = dc.replace(
         baseline_parameters,
-        num_households=20,
-        num_field_officers=2,
+        regions={"Test region": RegionParameters(num_households=20, num_field_officers=2)},
         daily_field_visits=daily_field_visits,
         field_first_day=3,
         field_last_day=4,

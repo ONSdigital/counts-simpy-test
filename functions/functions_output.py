@@ -1,4 +1,5 @@
 import math
+import textwrap
 
 import matplotlib.pyplot as plt
 
@@ -50,6 +51,7 @@ def initialise_household_return_history(households):
         "total_households": len(households),
         "active_households": [],
         "group_sizes": group_sizes,
+        "group_active_households": {group: [] for group in grouped_households},
         "group_proportion_returned": {group: [] for group in grouped_households},
     }
 
@@ -74,6 +76,7 @@ def aggregate_unit_return_histories(unit_histories):
             "total_households": 0,
             "active_households": [],
             "group_sizes": {},
+            "group_active_households": {},
             "group_proportion_returned": {},
         }
 
@@ -96,6 +99,7 @@ def aggregate_unit_return_histories(unit_histories):
         "total_households": sum(history.get("total_households", 0) for history in unit_histories),
         "active_households": [],
         "group_sizes": aggregate_group_sizes,
+        "group_active_households": {group: [] for group in all_groups},
         "group_proportion_returned": {group: [] for group in all_groups},
     }
 
@@ -117,21 +121,23 @@ def aggregate_unit_return_histories(unit_histories):
             aggregate_history["proportion_returned"].append(0)
 
         for group in all_groups:
-            group_total = aggregate_group_sizes[group]
-            if group_total == 0:
-                aggregate_history["group_proportion_returned"][group].append(0)
-                continue
-
+            group_total = 0
             weighted_group_responded = 0
             for history in unit_histories:
-                group_size = history.get("group_sizes", {}).get(group, 0)
+                active_counts = history.get("group_active_households", {}).get(group)
+                group_size = (
+                    active_counts[index] if active_counts is not None
+                    else history.get("group_sizes", {}).get(group, 0)
+                )
+                group_total += group_size
                 if group_size == 0:
                     continue
                 group_proportion = history["group_proportion_returned"][group][index]
                 weighted_group_responded += group_proportion * group_size
 
+            aggregate_history["group_active_households"][group].append(group_total)
             aggregate_history["group_proportion_returned"][group].append(
-                weighted_group_responded / group_total
+                weighted_group_responded / group_total if group_total else 0
             )
 
     return aggregate_history
@@ -188,6 +194,7 @@ def record_household_return_proportions(env, households, history):
             for household in households
             if household.demographic_group == group and household.is_active
         ]
+        history["group_active_households"][group].append(len(group_households))
         history["group_proportion_returned"][group].append(
             (sum(h.responded for h in group_households) / len(group_households))
             if group_households
@@ -211,6 +218,7 @@ def record_household_return_proportions(env, households, history):
                 for household in households
                 if household.demographic_group == group and household.is_active
             ]
+            history["group_active_households"][group].append(len(group_households))
             history["group_proportion_returned"][group].append(
                 (sum(h.responded for h in group_households) / len(group_households))
                 if group_households
@@ -225,9 +233,9 @@ def plot_household_return_proportions(
     call_centre_history=None,
     show_plot=False,
     output_path=None,
-    unit_histories=None,
+    region_histories=None,
 ):
-    """Plot aggregate and optional unit-level response curves.
+    """Plot the overall response curves above named regional panels.
 
     Args:
         history: Output-series dictionary created during the simulation run.
@@ -237,14 +245,14 @@ def plot_household_return_proportions(
             daily call counts. Included for compatibility but not plotted.
         show_plot: Whether to display an interactive chart window.
         output_path: Optional image path to save the chart.
-        unit_histories: Optional list of per-unit history dictionaries. When
-            provided, unit-level charts are shown in a grid below the main chart.
+        region_histories: Optional mapping of region names to history dictionaries,
+            shown in a grid below the overall chart.
     """
 
     all_groups = set(history.get("group_proportion_returned", {}).keys())
-    if unit_histories:
-        for unit_history in unit_histories:
-            all_groups.update(unit_history.get("group_proportion_returned", {}).keys())
+    if region_histories:
+        for region_history in region_histories.values():
+            all_groups.update(region_history.get("group_proportion_returned", {}).keys())
     ordered_groups = sorted(all_groups)
     color_palette = plt.get_cmap("tab10")
     group_colors = {
@@ -253,6 +261,13 @@ def plot_household_return_proportions(
     }
 
     def draw_response_curves(axis, chart_history, include_labels):
+        axis.plot(
+            chart_history["time"],
+            chart_history["proportion_returned"],
+            linewidth=2.2,
+            color="black",
+            label="Overall" if include_labels else None,
+        )
         for group in ordered_groups:
             proportions = chart_history.get("group_proportion_returned", {}).get(group)
             if proportions is None:
@@ -286,10 +301,10 @@ def plot_household_return_proportions(
         axis.set_ylim(0, 1)
         axis.grid(True, alpha=0.25)
 
-    if not unit_histories:
+    if not region_histories:
         fig, main_axis = plt.subplots(figsize=(8, 5))
         draw_response_curves(main_axis, history, include_labels=True)
-        main_axis.set_title("Household returns over time")
+        main_axis.set_title("Overall: England and Wales")
         main_axis.set_xlabel("Time")
         main_axis.set_ylabel("Proportion of households returned")
         handles, labels = main_axis.get_legend_handles_labels()
@@ -297,9 +312,9 @@ def plot_household_return_proportions(
             fig.legend(handles, labels, loc="lower center", ncol=min(5, len(labels)))
         fig.tight_layout(rect=(0, 0.06, 1, 1))
     else:
-        unit_count = len(unit_histories)
-        num_columns = min(4, max(1, math.ceil(math.sqrt(unit_count))))
-        num_rows = math.ceil(unit_count / num_columns)
+        region_count = len(region_histories)
+        num_columns = min(3, max(1, math.ceil(math.sqrt(region_count))))
+        num_rows = math.ceil(region_count / num_columns)
 
         fig = plt.figure(figsize=(4 * num_columns, 3.6 + 2.1 * num_rows))
         grid = fig.add_gridspec(
@@ -310,21 +325,21 @@ def plot_household_return_proportions(
 
         main_axis = fig.add_subplot(grid[0, :])
         draw_response_curves(main_axis, history, include_labels=True)
-        main_axis.set_title("All units combined")
+        main_axis.set_title("Overall: England and Wales")
         main_axis.set_xlabel("Time")
         main_axis.set_ylabel("Proportion of households returned")
 
-        for index, unit_history in enumerate(unit_histories):
+        for index, (region_name, region_history) in enumerate(region_histories.items()):
             row = 1 + (index // num_columns)
             column = index % num_columns
-            unit_axis = fig.add_subplot(grid[row, column])
-            draw_response_curves(unit_axis, unit_history, include_labels=False)
-            unit_axis.set_title(f"Unit {index}")
-            unit_axis.set_xlabel("")
-            unit_axis.set_ylabel("")
+            region_axis = fig.add_subplot(grid[row, column])
+            draw_response_curves(region_axis, region_history, include_labels=False)
+            region_axis.set_title(textwrap.fill(region_name, width=24))
+            region_axis.set_xlabel("")
+            region_axis.set_ylabel("")
 
         total_slots = num_rows * num_columns
-        for index in range(unit_count, total_slots):
+        for index in range(region_count, total_slots):
             row = 1 + (index // num_columns)
             column = index % num_columns
             empty_axis = fig.add_subplot(grid[row, column])

@@ -169,3 +169,32 @@ def test_out_of_stock_households_use_print_on_demand_delay_before_post():
 
     assert household.waiting_for_pq is False
     assert household.paper_first is False
+
+
+def test_one_call_centre_and_paper_stock_serve_all_regions():
+    import dataclasses as dc
+
+    from functions.simulation_runner import run_simulation
+    from parameters import RegionParameters, baseline_parameters
+
+    params = dc.replace(
+        baseline_parameters,
+        regions={
+            "North East": RegionParameters(4, 0),
+            "Wales": RegionParameters(6, 0),
+        },
+        daily_response_probabilities_by_group={group: [0.0] * 50 for group in ("A", "B", "C")},
+        paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 1.0),
+        call_centre_call_probability=1.0,
+        initial_paper_batch=3,
+        pQ_postal_delay=1,
+        printing_delay=5,
+    )
+
+    result = run_simulation(params, run_until=3, generate_plot=False)
+    households = [household for region in result.regions for household in region.households]
+
+    assert result.call_centre_history["time"] == pytest.approx([1.85, 2.85])
+    assert result.call_centre_history["daily_calls"] == [10, 0]
+    assert sum(not household.paper_first for household in households) == 3
+    assert sum(household.waiting_for_pq for household in households) == 7

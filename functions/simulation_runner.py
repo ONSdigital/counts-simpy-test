@@ -5,16 +5,17 @@ import simpy
 
 import functions.functions_contact_centre as cc
 import functions.functions_output as out
-from functions.function_core import build_unit
+from functions.function_core import build_region
 from parameters import SimulationParameters
 from parameters import baseline_parameters
-from functions.simulation_types import UnitState
+from functions.simulation_types import RegionState, UnitState
 
 
 @dc.dataclass
 class SimulationRunResult:
     params: SimulationParameters
     units: list[UnitState]
+    regions: list[RegionState]
     call_centre_history: dict
     aggregate_history: dict
 
@@ -39,12 +40,8 @@ def run_simulation(
         output_path: Optional image path for the chart.
 
     Returns:
-        SimulationRunResult containing unit-level and aggregate outputs.
+        SimulationRunResult containing regional and aggregate outputs.
     """
-
-    num_units = scenario_params.num_field_officers
-    if num_units <= 0:
-        raise ValueError("num_field_officers must be greater than 0")
 
     env = simpy.Environment()
     paper_questionnaire_service = cc.PaperQuestionnaireService(
@@ -53,24 +50,22 @@ def run_simulation(
         scenario_params.printing_delay,
     )
 
-    households_per_unit = scenario_params.num_households // num_units
-    household_remainder = scenario_params.num_households % num_units
-
     units = []
+    regions = []
     next_household_id = 0
-    for unit_id in range(num_units):
-        unit_household_count = households_per_unit + (1 if unit_id < household_remainder else 0)
-        units.append(
-            build_unit(
-                env,
-                unit_id,
-                scenario_params,
-                unit_household_count,
-                next_household_id,
-                paper_questionnaire_service,
-            )
+    for name, region_params in scenario_params.regions.items():
+        region = build_region(
+            env,
+            name,
+            region_params,
+            scenario_params,
+            len(units),
+            next_household_id,
+            paper_questionnaire_service,
         )
-        next_household_id += unit_household_count
+        regions.append(region)
+        units.extend(region.units)
+        next_household_id += region_params.num_households
 
     all_open_household_lists = [unit.open_households for unit in units]
     call_centre_history = out.initialise_call_centre_history()
@@ -111,8 +106,12 @@ def run_simulation(
         else:
             print(f"Simulation reached day {run_until}")
 
+    for region in regions:
+        region.return_history = out.aggregate_unit_return_histories(
+            [unit.return_history for unit in region.units]
+        )
     aggregate_history = out.aggregate_unit_return_histories(
-        [unit.return_history for unit in units]
+        [region.return_history for region in regions]
     )
 
     if generate_plot:
@@ -123,12 +122,13 @@ def run_simulation(
             call_centre_history=call_centre_history,
             show_plot=show_plot,
             output_path=output_path,
-            unit_histories=[unit.return_history for unit in units],
+            region_histories={region.name: region.return_history for region in regions},
         )
 
     return SimulationRunResult(
         params=scenario_params,
         units=units,
+        regions=regions,
         call_centre_history=call_centre_history,
         aggregate_history=aggregate_history,
     )

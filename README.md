@@ -18,6 +18,7 @@ The model currently includes:
 - SMS intervention effects,
 - field officer visit effects,
 - call-centre activity,
+- concurrent regional populations on one shared simulation clock,
 - output tracking and plotting.
 
 
@@ -25,7 +26,7 @@ The model currently includes:
 
 - `app_streamlit.py`: local UI to run scenarios and view KPIs/plot.
 - `simulation.py`: script entrypoint for non-UI simulation runs.
-- `simulation_runner.py`: reusable run function used by the app.
+- `functions/simulation_runner.py`: reusable run function used by the app and script.
 - `parameters.py`: scenario parameter dataclass and defaults.
 - `functions/`: simulation event logic modules.
 - `tests/`: automated tests.
@@ -34,7 +35,7 @@ The model currently includes:
 Default run behavior:
 
 - `simulation.py` and `app_streamlit.py` use `baseline_parameters` by default.
-- `new_scenario_parameters` in `parameters.py` is kept as an example of how to
+- `PoC_parameters` in `parameters.py` is kept as an example of how to
 	create a modified scenario.
 
 
@@ -94,7 +95,8 @@ What happens:
 - Streamlit starts a local web app and shows a local URL (usually
 	`http://localhost:8501`).
 - Open that URL in your browser.
-- Use the sidebar to adjust parameters.
+- Edit regional populations, officer counts and A/B/C shares in the regional table.
+- Use the sidebar for the shared intervention and response settings.
 - Click **Run simulation**.
 - The app displays:
 	- final overall return proportion,
@@ -102,7 +104,8 @@ What happens:
 	- final active households,
 	- total call-centre calls,
 	- doorstep completions,
-	- and a generated plot image.
+	- a regional results table,
+	- and an overall chart above named regional panels.
 
 
 ## Option B: Run the Python Script Directly
@@ -116,8 +119,8 @@ python simulation.py
 What happens:
 
 - The simulation runs in the terminal and prints progress by day.
-- Final per-unit return proportions are printed.
-- A plot is generated and saved as `household_returns.png`.
+- The overall result is printed first, followed by named regional results.
+- The overall-and-regions plot is displayed and also saved as `household_returns.png`.
 
 
 ## Local Map Data
@@ -133,9 +136,58 @@ keeping each shapefile and its companion files together.
 - Default scenario values are in `parameters.py`.
 - `simulation.py` and `app_streamlit.py` both use
 	`baseline_parameters` as the run baseline.
-- `new_scenario_parameters` is an example scenario object only.
+- `PoC_parameters` is an example scenario object only.
 - For script-based runs, edit values in `parameters.py` before running.
-- For app-based runs, use the sidebar controls at runtime.
+- For app-based runs, use the regional table and sidebar controls at runtime.
+
+### Regions
+
+`SimulationParameters.regions` maps region names to `RegionParameters` objects.
+Each region sets its own `num_households`, `num_field_officers` and
+`household_type_proportions` for A, B and C. Shares must be between 0 and 1 and
+sum to 1. Household counts are allocated to whole numbers using the largest
+fractional remainders, preserving the region's exact total.
+
+The defaults include the nine English regions (North East, North West,
+Yorkshire and the Humber, East Midlands, West Midlands, East of England,
+London, South East and South West) plus Wales. Each starts with 10,000
+households, 10 officers and equal A/B/C shares: these are illustrative values,
+not real regional population estimates. Replace them with your scenario data.
+For example, a small two-region scenario can be defined as:
+
+```python
+import dataclasses as dc
+from parameters import RegionParameters, baseline_parameters
+
+scenario = dc.replace(
+	baseline_parameters,
+	regions={
+		"North East": RegionParameters(
+			num_households=10000,
+			num_field_officers=10,
+			household_type_proportions={"A": 0.5, "B": 0.3, "C": 0.2},
+		),
+		"Wales": RegionParameters(
+			num_households=6000,
+			num_field_officers=6,
+			household_type_proportions={"A": 0.2, "B": 0.3, "C": 0.5},
+		),
+	},
+)
+```
+
+All regions run together on one SimPy clock. Each region retains internal
+officer units and their daily visit limits. Zero officers disables field
+visits in that region without stopping baseline responses, SMS or calls.
+Empty regions are also supported. The call centre and paper questionnaire
+stock are shared across every region; `initial_paper_batch` is a single total,
+not a per-region allocation. Other intervention settings remain shared.
+
+Reports show the overall result first, then each named region, not individual
+officer units. Overall rates are weighted by active household counts, rather
+than averaging regional percentages. In code, use `result.regions` and each
+region's `name`, `households` and `return_history`. `result.units` remains an
+internal lower-level view.
 
 ### Daily Field Visits
 

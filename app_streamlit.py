@@ -4,7 +4,7 @@ from pathlib import Path
 import streamlit as st
 
 import functions.functions_output as out
-from parameters import baseline_parameters
+from parameters import RegionParameters, baseline_parameters
 from functions.simulation_runner import run_simulation
 
 
@@ -14,22 +14,35 @@ st.caption("Lightweight UI for scenario tuning and output plotting")
 
 base_params = baseline_parameters
 
+with st.expander("Regional parameters", expanded=True):
+    region_rows = st.data_editor(
+        [
+            {
+                "Region": name,
+                "Households": region.num_households,
+                "Officers": region.num_field_officers,
+                **region.household_type_proportions,
+            }
+            for name, region in base_params.regions.items()
+        ],
+        disabled=["Region"],
+        hide_index=True,
+        column_config={
+            "Households": st.column_config.NumberColumn(min_value=0, step=1, required=True),
+            "Officers": st.column_config.NumberColumn(min_value=0, step=1, required=True),
+            **{
+                group: st.column_config.NumberColumn(
+                    f"{group} share", min_value=0.0, max_value=1.0, step=0.01,
+                    format="%.4f", required=True,
+                )
+                for group in ("A", "B", "C")
+            },
+        },
+        key="regional_parameters",
+    )
+
 with st.sidebar:
     st.header("Scenario Parameters")
-    num_households = st.number_input(
-        "Number of households",
-        min_value=100,
-        max_value=30_000_000,
-        value=base_params.num_households,
-        step=100,
-    )
-    num_field_officers = st.number_input(
-        "Number of field officers",
-        min_value=1,
-        max_value=500,
-        value=base_params.num_field_officers,
-        step=1,
-    )
     daily_field_visits = st.number_input(
         "Daily field visits per officer",
         min_value=0,
@@ -102,13 +115,25 @@ with st.sidebar:
 
     run_clicked = st.button("Run simulation", type="primary")
 
+configured_regions = {}
+for row in region_rows:
+    try:
+        configured_regions[row["Region"]] = RegionParameters(
+            num_households=row["Households"],
+            num_field_officers=row["Officers"],
+            household_type_proportions={group: row[group] for group in ("A", "B", "C")},
+        )
+    except (TypeError, ValueError) as error:
+        st.error(f"Invalid parameters for {row['Region']}: {error}")
+        configured_regions = None
+        break
+
 if field_last_day < field_first_day:
     st.error("Field operations last day must be greater than or equal to first day.")
-elif run_clicked:
+elif run_clicked and configured_regions is not None:
     scenario_params = dc.replace(
         base_params,
-        num_households=num_households,
-        num_field_officers=num_field_officers,
+        regions=configured_regions,
         daily_field_visits=daily_field_visits,
         field_first_day=field_first_day,
         field_last_day=field_last_day,
@@ -154,7 +179,7 @@ elif run_clicked:
             call_centre_history=result.call_centre_history,
             show_plot=False,
             output_path=str(output_path),
-            unit_histories=[unit.return_history for unit in result.units],
+            region_histories={region.name: region.return_history for region in result.regions},
         )
 
     st.success("Simulation completed")
@@ -165,10 +190,14 @@ elif run_clicked:
     total_calls = sum(result.call_centre_history["daily_calls"])
     doorstep_completions = sum(
         household.doorstep_completions
-        for unit in result.units
-        for household in unit.households
+        for region in result.regions
+        for household in region.households
     )
 
+    st.subheader("Overall: England and Wales")
+    st.caption(
+        f"{result.aggregate_history['total_households']:,} households across {len(result.regions)} regions"
+    )
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Final overall proportion", f"{final_proportion:.3f}")
     c2.metric("Final responded count", f"{final_responded}")
@@ -176,8 +205,27 @@ elif run_clicked:
     c4.metric("Total call-centre calls", f"{total_calls}")
     c5.metric("Doorstep completions", f"{doorstep_completions}")
 
+    st.subheader("Regional results")
+    st.dataframe(
+        [
+            {
+                "Region": region.name,
+                "Households": region.return_history["total_households"],
+                "Officers": scenario_params.regions[region.name].num_field_officers,
+                "Active households": region.return_history["active_households"][-1],
+                "Returned": region.return_history["responded_count"][-1],
+                "Returned (%)": 100 * region.return_history["proportion_returned"][-1],
+                "Field visits": sum(household.field_knocks for household in region.households),
+                "Doorstep completions": sum(household.doorstep_completions for household in region.households),
+            }
+            for region in result.regions
+        ],
+        hide_index=True,
+        column_config={"Returned (%)": st.column_config.NumberColumn(format="%.1f")},
+    )
+
     if output_path.exists():
-        st.image(str(output_path), caption="Household returns over time", use_container_width=True)
+        st.image(str(output_path), caption="Overall and regional household returns", width="stretch")
     else:
         st.warning("Plot output file was not found.")
 else:
