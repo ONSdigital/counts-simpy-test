@@ -48,6 +48,7 @@ class Household:
         self.field_knocks = 0
         #number of successful doorstep completions at this household
         self.doorstep_completions = 0
+        self.simple_field_successes = 0
         #day on which the household becomes eligible for another field visit
         self.next_field_visit_day = 0
 
@@ -93,6 +94,7 @@ def daily_response_updates(
     rng,
     daily_response_probabilities_by_group,
     open_households=None,
+    sms_list=None,
 ):
     """Update household response status once per simulated day.
 
@@ -103,6 +105,7 @@ def daily_response_updates(
         daily_response_probabilities_by_group: Group-specific baseline values
             for days 1 to 50. Later days retain the final value. Interventions
             make separate response attempts without changing these values.
+        sms_list: Optional SMS contact list; respondents are removed immediately.
 
     Yields:
         SimPy timeout events that advance the process by one day at a time.
@@ -125,6 +128,8 @@ def daily_response_updates(
                     household.responded = True
                     if open_households is not None and household in open_households:
                         open_households.remove(household)
+                    if sms_list is not None and household in sms_list:
+                        sms_list.remove(household)
 
         day_index += 1
         yield env.timeout(1)

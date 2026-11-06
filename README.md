@@ -19,6 +19,7 @@ The model currently includes:
 - field officer visit effects,
 - call-centre activity,
 - concurrent regional populations on one shared simulation clock,
+- Monte Carlo repeats with mean outcomes and central 95% run intervals,
 - output tracking and plotting.
 
 
@@ -31,6 +32,8 @@ The model currently includes:
 - `functions/`: simulation event logic modules.
 - `tests/`: automated tests.
 - `docs/project_reference.rst`: fuller technical reference.
+- [Model setup and running flowchart](docs/model_setup_and_running_flowchart.md):
+  regional officer areas, household allocation, simulation runs and Monte Carlo summaries.
 
 Default run behavior:
 
@@ -99,13 +102,11 @@ What happens:
 - Use the sidebar for the shared intervention and response settings.
 - Click **Run simulation**.
 - The app displays:
-	- final overall return proportion,
-	- final responded count,
-	- final active households,
-	- total call-centre calls,
-	- doorstep completions,
-	- a regional results table,
-	- and an overall chart above named regional panels.
+	- mean overall return proportion and response counts,
+	- mean active households, call-centre calls and doorstep completions,
+	- an overall table with mean, 95% lower and 95% upper columns,
+	- a regional results table with mean return rates and 95% intervals,
+	- and mean curves with uncertainty bands, overall above named regional panels.
 
 
 ## Option B: Run the Python Script Directly
@@ -118,8 +119,8 @@ python simulation.py
 
 What happens:
 
-- The simulation runs in the terminal and prints progress by day.
-- The overall result is printed first, followed by named regional results.
+- The simulation prints progress by repeat and day.
+- The overall mean/95% interval table is printed first, followed by regional summaries.
 - The overall-and-regions plot is displayed and also saved as `household_returns.png`.
 
 
@@ -139,6 +140,61 @@ keeping each shapefile and its companion files together.
 - `PoC_parameters` is an example scenario object only.
 - For script-based runs, edit values in `parameters.py` before running.
 - For app-based runs, use the regional table and sidebar controls at runtime.
+
+### Simulation Weekdays
+
+`census_start_weekday` sets the weekday at simulation time 0 (default `"Monday"`).
+Set it in `parameters.py` or use the app's **Census starting weekday (day 0)**
+control. Day 1 is the following weekday; fractional times stay within their
+whole day, so time 6.9 is Sunday and time 7 is Monday with the default start.
+
+Use `params.weekday_at(env.now)` inside simulation processes, or
+`result.params.weekday_at(day)` after a run, to look up any simulation time.
+Single-run unit, regional, aggregate and call-centre histories include a
+`weekday` list aligned with `time`. Monte Carlo aggregate, regional and
+call-centre histories retain these weekday labels. Progress messages also show
+the weekday. Field visits use this calendar to select weekday or weekend
+working slots. Other response and intervention processes retain their timing.
+
+### Monte Carlo Repeats
+
+`monte_carlo_repeats` is a positive integer controlling how many independent
+runs the app or script performs (default 10). Set it in `parameters.py` or use
+the app's **Monte Carlo repeats** control. Each repeat starts a fresh model,
+including household states, clock, call centre and shared paper stock.
+Distinct seeds are derived reproducibly from the scenario's starting `seed`.
+Repeats run sequentially; regions within each repeat share one clock.
+
+The overall table reports the mean and the 2.5th/97.5th percentiles of each
+final outcome across runs. This is a central empirical **95% run interval**,
+not a confidence interval for the mean. Means and percentile limits for counts
+can be fractional. With one repeat, both limits equal that run's result and
+cannot estimate variation. Small repeat counts give unstable tail estimates;
+use more repeats (for example 100 or more) for more reliable percentiles.
+Runtime grows approximately with the number of repeats.
+
+Plots retain the existing daily timestamps and intervention markers. Lines
+show mean return rates; shaded bands show pointwise 95% run intervals, not a
+simultaneous interval for the whole curve. Each run's overall rate is weighted
+by active households before rates are averaged across runs.
+
+For direct API use, `run_simulation()` remains a single-run building block.
+Use `run_monte_carlo()` for repeated runs:
+
+```python
+import dataclasses as dc
+from parameters import baseline_parameters
+from functions.simulation_runner import run_monte_carlo
+
+params = dc.replace(baseline_parameters, monte_carlo_repeats=100)
+result = run_monte_carlo(params, generate_plot=False)
+print(result.overall_summary["proportion_returned"])
+```
+
+The repeated-run result exposes `overall_summary`, `region_summaries`,
+mean `aggregate_history`, named mean `region_histories`, mean
+`call_centre_history` and `run_seeds`. Household objects are not retained for
+every repeat, keeping memory use lower.
 
 ### Regions
 
@@ -185,18 +241,148 @@ not a per-region allocation. Other intervention settings remain shared.
 
 Reports show the overall result first, then each named region, not individual
 officer units. Overall rates are weighted by active household counts, rather
-than averaging regional percentages. In code, use `result.regions` and each
-region's `name`, `households` and `return_history`. `result.units` remains an
-internal lower-level view.
+than averaging regional percentages. Single-run results expose `result.regions`
+and each region's `name`, `households` and `return_history`; `result.units`
+remains an internal lower-level view. Monte Carlo results instead expose
+`region_summaries` and `region_histories` keyed by region name.
 
-### Daily Field Visits
+### Field Visit Slots
 
-`daily_field_visits` sets the maximum visits completed per officer each day
-(default 30). All visits happen at the same simulated time on each day from
-`field_first_day` through `field_last_day`, inclusive. There is no visit duration
-or spillover into later days. Fewer visits occur when fewer households are
-eligible; revisit waiting periods still apply. Set the value to 0 to disable
-visits. This replaces `field_visit_duration` and `field_daily_queue_size`.
+#### Simple and detailed field modes
+
+`field_visit_mode` selects `"simple"` (the default) or `"detailed"`.
+Use the **Field visit mode** selector in Streamlit or change the parameter for
+script/API runs. Results retain the mode in `result.params`; app and script
+report it alongside results. Both modes use the same queues, officer hours,
+time slots, visit records and revisit delays. Refusing households are excluded
+from field visits in **both** modes.
+
+Simple mode uses one mutually exclusive draw per knock:
+
+| Outcome | Parameter | Default |
+|---------|-----------|---------|
+| Doorstep completion | `field_doorstep_completion_probability` | 0.5 |
+| Refusal | `refusal_probability` | 0.01 |
+| Vacancy | `field_vacancy_probability` | 0.05 |
+| Ordinary success | `field_success_probability_by_slot` | 0.3 in every slot |
+| No outcome | Remaining probability | 0.14 |
+
+These are unconditional probabilities, not sequential conditional draws.
+The four configured probabilities must sum to at most 1 **in every slot**.
+Increasing doorstep completion therefore requires leaving sufficient probability
+for the other outcomes. Doorstep completion always returns the household,
+including paper-first households and those already awaiting paper.
+While awaiting paper, all non-doorstep draws become no outcome: no refusal,
+vacancy, success or duplicate paper order is possible.
+
+Refusal sets `refusal=True` and prevents future field visits. Vacancy removes
+the household from the active population and intervention lists.
+An ordinary success immediately returns a non-paper-first household.
+For a paper-first household it instead orders a questionnaire through the shared
+paper service, consuming stock and using postal plus any out-of-stock printing
+delay. On delivery it immediately returns the household, provided it is still
+active, has not refused and has not already responded. Only paper ordered via
+simple-mode field success gains this immediate response-on-delivery behaviour;
+contact-centre and detailed-mode paper orders retain their existing behaviour.
+Unsuccessful visits and paper orders use `field_days_until_next_visit`.
+
+`simple_field_successes` counts ordinary successes resulting in a response,
+including completed paper deliveries, **not** pending orders or doorstep
+completions. Each household stores its count; overall and regional Monte Carlo
+summaries report the mean and run interval separately from `doorstep_completions`.
+
+Detailed mode retains the original door-answer decision tree, including
+conditional doorstep completion, paper orders, vacancy on no answer and
+one-off response attempts. Its door-answer and response-after-answer slot
+probabilities, and `field_visit_response_probability_if_no_answer` and
+`field_vacancy_probability_if_no_answer`, do not control simple-mode outcomes.
+Conversely, simple refusal, vacancy and success probabilities do not control
+detailed outcomes. Switching to detailed does not enforce the simple-mode
+probability-sum constraint.
+
+#### Shared slot scheduling
+
+`field_officer_working_hours_by_slot` sets hours **per officer per day**:
+
+| Slot | Days used | Default hours |
+|------|-----------|---------------|
+| `morning` | Monday-Friday | 3 |
+| `afternoon` | Monday-Friday | 3 |
+| `evening` | Monday-Friday | 2 |
+| `weekend` | Saturday and Sunday | 8 on each day |
+
+Each slot's capacity is `floor(hours * field_officer_visits_per_hour)`.
+The shared visit rate defaults to 3.75 per hour. Fractional visits are discarded
+separately per slot, not pooled: defaults allow 11 morning, 11 afternoon and
+7 evening visits (29 per weekday), or 30 per weekend day. Zero hours disables
+a slot; all-zero hours disables visits. The visit rate must be finite and positive.
+Hours must be finite and non-negative, and all four slot keys are required.
+
+In **detailed mode**, two independent probability dictionaries also require all four slot keys:
+
+- `field_answer_door_probability_by_slot`: chance the door is answered.
+- `field_visit_response_probability_if_answer_by_slot`: chance of an immediate
+  response after answering, when there is no doorstep completion or paper order.
+
+Both default to **0.3 in every slot** and accept values from 0 to 1.
+The response-after-answer default was previously 0.5. Doorstep completion and
+the no-answer response chance remain separate parameters in detailed mode.
+Edit hours and both probabilities for each slot in the Streamlit sidebar.
+
+All slots still happen at the same simulated timestamp on each day from
+`field_first_day` through `field_last_day`, inclusive. Eligible households are
+assigned in list order to morning, then afternoon, then evening on weekdays;
+only the weekend slot is used on Saturday/Sunday. Each household is selected
+at most once per day, even with a zero revisit delay. Fewer visits occur when
+fewer households are eligible. There is no elapsed visit duration, unused
+capacity carry-over or spillover into later days; revisit waiting periods apply.
+
+Single-run results expose each officer unit's `field_visit_history`, containing
+`time`, `household_id` and `slot` for every visit actually performed.
+For example, `result.units[0].field_visit_history` shows the first officer's
+visits. `result.params.weekday_at(visit["time"])` gives a visit's weekday.
+Monte Carlo overall and regional summaries include `field_visits_morning`,
+`field_visits_afternoon`, `field_visits_evening` and `field_visits_weekend`.
+The overall results table also reports those slot totals.
+
+These settings replace `field_officer_working_hours_per_day`,
+`daily_field_visits`, `field_answer_door_probability` and
+`field_visit_response_probability_if_answer`; configure the slot dictionaries
+instead of passing those old arguments to `SimulationParameters`.
+
+### Reminder Letters
+
+`reminder_letter_days`, under fixed parameters, lists the days on which letters
+are posted (default `[10, 20, 30]`). An empty list disables reminders. Days must
+be unique non-negative integers; they are processed chronologically.
+The Streamlit sidebar provides sending-day and response-probability controls.
+Overall and regional graphs mark each configured sending day with a purple
+dashed line labelled **Reminder letters sent**. Markers use sending days,
+not delivery days, and do not include the postal delay.
+
+On each sending day at `day + 0.85` (the same daily offset as SMS), every active,
+non-responded household is sent one reminder, including paper-first and refusing
+households. Delivery occurs after `pQ_postal_delay`, with **no printing delay**
+and no use of paper questionnaire stock. Integer postal delays preserve the
+0.85 daily delivery offset. Sending does not block or defer field visits, SMS,
+other letters or paper questionnaire orders, so a household can be visited and
+receive a reminder on the same day.
+
+At delivery, an active household that has not responded and is neither
+paper-first nor refusing gets one response attempt with
+`reminder_letter_response_probability` (default 0.4). Success marks it responded
+and removes it from open-household and intervention lists. Eligibility is checked
+again at delivery; letters already posted remain counted if a household responds
+or is marked vacant in transit. Failed attempts do not change baseline response
+probabilities. Each subsequent letter can make another attempt.
+
+Single-run units expose `reminder_letter_history`: mailing `time`, aligned
+`letters_sent` counts, `total_letters_sent`, `letters_delivered` (to active
+households), and successful `responses`. Counts cover events before the run
+horizon; a posted letter can still be in transit at the end of the run.
+Monte Carlo overall and regional summaries expose `total_letters_sent`,
+`letters_delivered` and `reminder_letter_responses`, also shown in the overall
+results table in both the app and script.
 
 ### Daily Response Probabilities
 
@@ -217,7 +403,7 @@ daily decay. Interventions never modify the baseline table or add to daily
 response probabilities. Instead, SMS makes one response attempt per eligible
 household with probability `sms_response_probability` (default 0.3). Eligible
 field visits make one response attempt with probability
-`field_visit_response_probability_if_answer` (default 0.5) when there is no
+`field_visit_response_probability_if_answer_by_slot` (default 0.3 per slot) when there is no
 doorstep completion or paper order, or
 `field_visit_response_probability_if_no_answer` (default 0.2) when there is no
 answer and the household is not vacant. Each attempt either records an
@@ -231,6 +417,23 @@ The timing and indexing of subsequent daily draws are unchanged. Runs beyond day
 retain the day-50 baseline. In the app, edit the 50-row table in the sidebar.
 
 
+Contact-centre calls are restricted to active, outstanding, non-refusing
+households that require paper and are not already awaiting a questionnaire.
+Refusal prevents future calls; paper ordered before refusal can still arrive.
+
+## Running Tests
+
+With the virtual environment activated, run:
+
+```powershell
+python -m pytest
+```
+
+Tests use Matplotlib's non-interactive `Agg` backend to save and check plots
+without opening GUI windows or requiring Tk. This test-only configuration does
+not change interactive plotting when running the simulation script.
+
+
 ## Troubleshooting
 
 - If `python` is not recognized, install Python and reopen VS Code.
@@ -240,5 +443,21 @@ retain the day-50 baseline. In the app, edit the 50-row table in the sidebar.
 
 
 ## Documentation
+
+For a day-by-day guide without pseudocode, see the
+[plain-English household journey](docs/household_journey_plain_english.md).
+
+For SMS selection, contact and list removal, see the
+[SMS intervention flowchart](docs/sms_intervention_flowchart.md).
+
+For questionnaire requests, paper-first households, deliveries and reminder
+letters, see the [paper products flowchart](docs/paper_products_flowchart.md).
+
+SMS uses one central national list and one intervention process per run.
+All response routes remove respondents from this shared list immediately.
+Officer units retain references to it for removal, not separate SMS queues.
+Regional reporting is unchanged. A dedicated reproducible SMS random stream
+means individual outcomes can differ from earlier per-unit SMS runs with the
+same starting seed. Each Monte Carlo repeat starts a fresh national SMS list.
 
 For a fuller reference, see `docs/project_reference.rst`.

@@ -1,11 +1,12 @@
 import dataclasses as dc
+import math
 from pathlib import Path
 
 import streamlit as st
 
 import functions.functions_output as out
-from parameters import RegionParameters, baseline_parameters
-from functions.simulation_runner import run_simulation
+from parameters import FIELD_VISIT_SLOTS, WEEKDAYS, RegionParameters, baseline_parameters
+from functions.simulation_runner import run_monte_carlo
 
 
 st.set_page_config(page_title="Counts SimPy Runner", layout="wide")
@@ -43,11 +44,74 @@ with st.expander("Regional parameters", expanded=True):
 
 with st.sidebar:
     st.header("Scenario Parameters")
-    daily_field_visits = st.number_input(
-        "Daily field visits per officer",
-        min_value=0,
-        value=base_params.daily_field_visits,
+    census_start_weekday = st.selectbox(
+        "Census starting weekday (day 0)",
+        WEEKDAYS,
+        index=WEEKDAYS.index(base_params.census_start_weekday),
+    )
+    monte_carlo_repeats = st.number_input(
+        "Monte Carlo repeats",
+        min_value=1,
+        value=base_params.monte_carlo_repeats,
         step=1,
+    )
+    st.subheader("Field visit slots")
+    field_visit_mode = st.selectbox(
+        "Field visit mode", ("simple", "detailed"),
+        index=("simple", "detailed").index(base_params.field_visit_mode),
+    )
+    refusal_probability = st.slider(
+        "Simple per-knock refusal probability", 0.0, 1.0,
+        float(base_params.refusal_probability), step=0.01,
+    )
+    field_vacancy_probability = st.slider(
+        "Simple per-knock vacancy probability", 0.0, 1.0,
+        float(base_params.field_vacancy_probability), step=0.01,
+    )
+    st.caption(
+        "Simple: one draw for doorstep/refusal/vacancy/success/no outcome. "
+        "Detailed: original door-answer decision tree. Refusing households are not revisited."
+    )
+    field_officer_working_hours_by_slot = {}
+    field_answer_door_probability_by_slot = {}
+    field_visit_response_probability_if_answer_by_slot = {}
+    field_success_probability_by_slot = {}
+    for slot in FIELD_VISIT_SLOTS:
+        field_officer_working_hours_by_slot[slot] = st.number_input(
+            f"{slot.capitalize()} working hours per day",
+            min_value=0.0,
+            value=float(base_params.field_officer_working_hours_by_slot[slot]),
+            step=0.5,
+        )
+        field_answer_door_probability_by_slot[slot] = st.slider(
+            f"{slot.capitalize()} door-answer probability",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(base_params.field_answer_door_probability_by_slot[slot]),
+            step=0.01,
+            help="Detailed mode only.",
+        )
+        field_success_probability_by_slot[slot] = st.slider(
+            f"{slot.capitalize()} simple success probability",
+            min_value=0.0, max_value=1.0,
+            value=float(base_params.field_success_probability_by_slot[slot]),
+            step=0.01,
+            help="Simple mode only; excludes the separate doorstep-completion outcome.",
+        )
+        field_visit_response_probability_if_answer_by_slot[slot] = st.slider(
+            f"{slot.capitalize()} response probability after answering",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(base_params.field_visit_response_probability_if_answer_by_slot[slot]),
+            step=0.01,
+            help="Detailed mode only: response chance without doorstep completion or paper order.",
+        )
+    st.caption("Morning/afternoon/evening: Monday-Friday. Weekend: Saturday and Sunday only.")
+    field_officer_visits_per_hour = st.number_input(
+        "Field officer visits per hour",
+        min_value=0.1,
+        value=base_params.field_officer_visits_per_hour,
+        step=0.25,
     )
     field_first_day = st.number_input(
         "Field operations first day",
@@ -69,6 +133,20 @@ with st.sidebar:
         max_value=100,
         value=base_params.sms_timing,
         step=1,
+    )
+    st.subheader("Reminder letters")
+    reminder_letter_days = st.multiselect(
+        "Reminder letter sending days",
+        options=sorted(set(range(121)) | set(base_params.reminder_letter_days)),
+        default=base_params.reminder_letter_days,
+        help="Post to all active non-respondents on each selected day. Empty disables reminders.",
+    )
+    reminder_letter_response_probability = st.slider(
+        "Reminder letter response probability",
+        min_value=0.0,
+        max_value=1.0,
+        value=float(base_params.reminder_letter_response_probability),
+        step=0.01,
     )
     st.subheader("Daily baseline probabilities")
     daily_probability_table = st.data_editor(
@@ -104,6 +182,8 @@ with st.sidebar:
         max_value=1.0,
         value=float(base_params.field_doorstep_completion_probability),
         step=0.01,
+        help="Simple: per-knock automatic success, including while awaiting paper. "
+             "Detailed: completion probability conditional on answering.",
     )
     run_until = st.number_input(
         "Run until day",
@@ -128,16 +208,39 @@ for row in region_rows:
         configured_regions = None
         break
 
-if field_last_day < field_first_day:
+invalid_simple_slots = [
+    slot for slot, success in field_success_probability_by_slot.items()
+    if math.fsum((
+        field_doorstep_completion_probability, refusal_probability, field_vacancy_probability, success,
+    )) > 1
+] if field_visit_mode == "simple" else []
+
+if invalid_simple_slots:
+    st.error(
+        "Simple doorstep, refusal, vacancy and success probabilities must sum to at most 1 "
+        f"for each slot. Invalid slots: {', '.join(invalid_simple_slots)}."
+    )
+elif field_last_day < field_first_day:
     st.error("Field operations last day must be greater than or equal to first day.")
 elif run_clicked and configured_regions is not None:
     scenario_params = dc.replace(
         base_params,
         regions=configured_regions,
-        daily_field_visits=daily_field_visits,
+        census_start_weekday=census_start_weekday,
+        monte_carlo_repeats=monte_carlo_repeats,
+        field_visit_mode=field_visit_mode,
+        refusal_probability=refusal_probability,
+        field_vacancy_probability=field_vacancy_probability,
+        field_success_probability_by_slot=field_success_probability_by_slot,
+        field_officer_working_hours_by_slot=field_officer_working_hours_by_slot,
+        field_answer_door_probability_by_slot=field_answer_door_probability_by_slot,
+        field_visit_response_probability_if_answer_by_slot=field_visit_response_probability_if_answer_by_slot,
+        field_officer_visits_per_hour=field_officer_visits_per_hour,
         field_first_day=field_first_day,
         field_last_day=field_last_day,
         sms_timing=sms_timing,
+        reminder_letter_days=reminder_letter_days,
+        reminder_letter_response_probability=reminder_letter_response_probability,
         daily_response_probabilities_by_group={
             group: list(daily_probability_table[group])
             for group in ("A", "B", "C")
@@ -149,19 +252,22 @@ elif run_clicked and configured_regions is not None:
     output_path = Path("streamlit_household_returns.png")
     progress_placeholder = st.empty()
     progress_bar = st.progress(0)
-    progress_messages = []
 
-    def on_progress(day):
-        day_value = int(day)
-        progress_fraction = min(day_value / int(run_until), 1.0)
+    def on_progress(completed_days):
+        total_days = int(run_until) * monte_carlo_repeats
+        progress_fraction = min(completed_days / total_days, 1.0)
         progress_bar.progress(progress_fraction)
-        progress_messages.append(f"Simulation reached day {day_value}")
-        progress_placeholder.text("\n".join(progress_messages[-20:]))
+        repeat_number = min((int(completed_days) - 1) // int(run_until) + 1, monte_carlo_repeats)
+        day_number = int(completed_days) - (repeat_number - 1) * int(run_until)
+        weekday = scenario_params.weekday_at(day_number)
+        progress_placeholder.text(
+            f"Run {repeat_number}/{monte_carlo_repeats}: day {day_number} ({weekday})"
+        )
 
     progress_placeholder.info("Starting simulation run...")
 
     with st.spinner("Running simulation..."):
-        result = run_simulation(
+        result = run_monte_carlo(
             scenario_params=scenario_params,
             run_until=run_until,
             progress_interval=None,
@@ -179,49 +285,60 @@ elif run_clicked and configured_regions is not None:
             call_centre_history=result.call_centre_history,
             show_plot=False,
             output_path=str(output_path),
-            region_histories={region.name: region.return_history for region in result.regions},
+            region_histories=result.region_histories,
+            reminder_letter_days=scenario_params.reminder_letter_days,
         )
 
     st.success("Simulation completed")
 
-    final_proportion = result.aggregate_history["proportion_returned"][-1]
-    final_responded = result.aggregate_history["responded_count"][-1]
-    final_active = result.aggregate_history["active_households"][-1]
-    total_calls = sum(result.call_centre_history["daily_calls"])
-    doorstep_completions = sum(
-        household.doorstep_completions
-        for region in result.regions
-        for household in region.households
-    )
+    summary = result.overall_summary
 
     st.subheader("Overall: England and Wales")
     st.caption(
-        f"{result.aggregate_history['total_households']:,} households across {len(result.regions)} regions"
+        f"Field mode: {result.params.field_visit_mode}; "
+        f"{monte_carlo_repeats} runs; {result.aggregate_history['total_households']:,} "
+        f"households across {len(result.region_histories)} regions"
     )
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Final overall proportion", f"{final_proportion:.3f}")
-    c2.metric("Final responded count", f"{final_responded}")
-    c3.metric("Final active households", f"{final_active}")
-    c4.metric("Total call-centre calls", f"{total_calls}")
-    c5.metric("Doorstep completions", f"{doorstep_completions}")
+    c1.metric("Mean returned (%)", f"{100 * summary['proportion_returned']['mean']:.1f}")
+    c2.metric("Mean returned count", f"{summary['responded_count']['mean']:,.1f}")
+    c3.metric("Mean active households", f"{summary['active_households']['mean']:,.1f}")
+    c4.metric("Mean call-centre calls", f"{summary['total_calls']['mean']:,.1f}")
+    c5.metric("Mean doorstep completions", f"{summary['doorstep_completions']['mean']:,.1f}")
+    st.dataframe(
+        out.monte_carlo_summary_rows(summary),
+        hide_index=True,
+        column_config={
+            column: st.column_config.NumberColumn(format="%.2f")
+            for column in ("Mean", "95% lower", "95% upper")
+        },
+    )
+    st.caption("95% run intervals are the 2.5th and 97.5th percentiles across repeats.")
+    if monte_carlo_repeats == 1:
+        st.warning("One run cannot estimate variation; its interval limits equal its result.")
 
     st.subheader("Regional results")
     st.dataframe(
         [
             {
-                "Region": region.name,
-                "Households": region.return_history["total_households"],
-                "Officers": scenario_params.regions[region.name].num_field_officers,
-                "Active households": region.return_history["active_households"][-1],
-                "Returned": region.return_history["responded_count"][-1],
-                "Returned (%)": 100 * region.return_history["proportion_returned"][-1],
-                "Field visits": sum(household.field_knocks for household in region.households),
-                "Doorstep completions": sum(household.doorstep_completions for household in region.households),
+                "Region": name,
+                "Households": values["total_households"]["mean"],
+                "Officers": scenario_params.regions[name].num_field_officers,
+                "Mean active households": values["active_households"]["mean"],
+                "Returned": values["responded_count"]["mean"],
+                "Mean returned (%)": 100 * values["proportion_returned"]["mean"],
+                "95% lower (%)": 100 * values["proportion_returned"]["lower_95"],
+                "95% upper (%)": 100 * values["proportion_returned"]["upper_95"],
+                "Mean field visits": values["field_visits"]["mean"],
+                "Mean doorstep completions": values["doorstep_completions"]["mean"],
             }
-            for region in result.regions
+            for name, values in result.region_summaries.items()
         ],
         hide_index=True,
-        column_config={"Returned (%)": st.column_config.NumberColumn(format="%.1f")},
+        column_config={
+            column: st.column_config.NumberColumn(format="%.2f")
+            for column in ("Returned", "Mean returned (%)", "95% lower (%)", "95% upper (%)")
+        },
     )
 
     if output_path.exists():

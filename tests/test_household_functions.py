@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import simpy
 
-from parameters import RegionParameters
+from parameters import FIELD_VISIT_SLOTS, RegionParameters
 from functions.functions_households import Household
 from functions.functions_households import first_day_responses
 from functions.functions_households import daily_response_updates
@@ -242,17 +242,23 @@ def test_interventions_return_households_without_changing_baseline_tables(interv
     params = dc.replace(
         baseline_parameters,
         regions={"Test region": RegionParameters(num_households=60, num_field_officers=1)},
+        field_visit_mode="detailed",
         daily_response_probabilities_by_group=probabilities,
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
         sms_timing=0 if intervention == "sms" else 100,
         sms_response_probability=1.0,
         field_first_day=100 if intervention == "sms" else 3,
         field_last_day=3,
-        daily_field_visits=60,
-        field_answer_door_probability=1.0 if intervention == "answered_visit" else 0.0,
+        field_officer_working_hours_by_slot={
+            "morning": 8.0, "afternoon": 0.0, "evening": 0.0, "weekend": 8.0,
+        },
+        field_officer_visits_per_hour=7.5,
+        field_answer_door_probability_by_slot=dict.fromkeys(
+            FIELD_VISIT_SLOTS, 1.0 if intervention == "answered_visit" else 0.0
+        ),
         field_doorstep_completion_probability=0.0,
         field_vacancy_probability_if_no_answer=0.0,
-        field_visit_response_probability_if_answer=1.0,
+        field_visit_response_probability_if_answer_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 1.0),
         field_visit_response_probability_if_no_answer=1.0,
     )
     result = run_simulation(params, run_until=5, generate_plot=False)
@@ -374,3 +380,97 @@ def test_default_regions_include_nine_english_regions_and_wales():
         "North East", "North West", "Yorkshire and the Humber", "East Midlands",
         "West Midlands", "East of England", "London", "South East", "South West", "Wales",
     }
+
+
+def test_monte_carlo_repeats_use_distinct_reproducible_seeds_and_summarise_actual_runs():
+    import dataclasses as dc
+    import numpy as np
+
+    from functions.simulation_runner import run_monte_carlo, run_simulation
+    from parameters import baseline_parameters
+
+    params = dc.replace(
+        baseline_parameters,
+        regions={"North East": RegionParameters(12, 1), "Wales": RegionParameters(8, 1)},
+        monte_carlo_repeats=4,
+        seed=7,
+        daily_response_probabilities_by_group={group: [0.2] * 50 for group in ("A", "B", "C")},
+        paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
+        field_first_day=100,
+        sms_timing=100,
+    )
+    result = run_monte_carlo(params, run_until=3, generate_plot=False)
+    repeated = run_monte_carlo(params, run_until=3, generate_plot=False)
+    individual_runs = [
+        run_simulation(dc.replace(params, seed=seed), run_until=3, generate_plot=False)
+        for seed in result.run_seeds
+    ]
+    counts = [run.aggregate_history["responded_count"][-1] for run in individual_runs]
+
+    assert len(result.run_seeds) == 4
+    assert len(set(result.run_seeds)) == 4
+    assert result.run_seeds[0] == params.seed
+    assert result.overall_summary == repeated.overall_summary
+    assert result.region_summaries == repeated.region_summaries
+    assert result.overall_summary["responded_count"] == pytest.approx({
+        "mean": np.mean(counts), "lower_95": np.quantile(counts, 0.025),
+        "upper_95": np.quantile(counts, 0.975),
+    })
+    assert result.aggregate_history["proportion_returned"] == pytest.approx(
+        np.mean([run.aggregate_history["proportion_returned"] for run in individual_runs], axis=0)
+    )
+    assert list(result.region_histories) == ["North East", "Wales"]
+    assert result.overall_summary["total_households"]["mean"] == 20
+
+
+@pytest.mark.parametrize("repeats", [0, -1, 1.5, True])
+def test_monte_carlo_repeat_count_must_be_a_positive_integer(repeats):
+    from parameters import SimulationParameters
+
+    with pytest.raises(ValueError, match="monte_carlo_repeats"):
+        SimulationParameters(monte_carlo_repeats=repeats)
+
+
+def test_monte_carlo_progress_covers_all_repeats_and_only_plots_once(monkeypatch):
+    import dataclasses as dc
+    from unittest.mock import Mock
+
+    from functions.simulation_runner import run_monte_carlo
+    from parameters import baseline_parameters
+
+    params = dc.replace(
+        baseline_parameters,
+        regions={"Wales": RegionParameters(10, 1)},
+        monte_carlo_repeats=3,
+    )
+    progress = []
+    plot = Mock()
+    monkeypatch.setattr("functions.functions_output.plot_household_return_proportions", plot)
+    result = run_monte_carlo(params, run_until=2, progress_callback=progress.append)
+
+    assert progress == [1, 2, 3, 4, 5, 6]
+    plot.assert_called_once()
+    assert plot.call_args.kwargs["region_histories"] == result.region_histories
+    assert "proportion_returned_lower_95" in plot.call_args.args[0]
+
+
+def test_one_monte_carlo_repeat_matches_single_run_and_has_zero_width_interval():
+    import dataclasses as dc
+
+    from functions.simulation_runner import run_monte_carlo, run_simulation
+    from parameters import baseline_parameters
+
+    params = dc.replace(
+        baseline_parameters,
+        regions={"Wales": RegionParameters(10, 1)},
+        monte_carlo_repeats=1,
+    )
+    result = run_monte_carlo(params, run_until=1, generate_plot=False)
+    single = run_simulation(params, run_until=1, generate_plot=False)
+    count = single.aggregate_history["responded_count"][-1]
+
+    assert result.overall_summary["responded_count"] == {
+        "mean": count, "lower_95": count, "upper_95": count,
+    }
+    assert result.aggregate_history["proportion_returned"] == single.aggregate_history["proportion_returned"]
+    assert result.call_centre_history["daily_calls"] == []

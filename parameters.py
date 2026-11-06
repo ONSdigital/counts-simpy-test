@@ -2,6 +2,10 @@ import dataclasses as dc
 import math
 
 
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+FIELD_VISIT_SLOTS = ("morning", "afternoon", "evening", "weekend")
+
+
 @dc.dataclass(frozen=True)
 class RegionParameters:
     # Total households created in this region.
@@ -33,8 +37,14 @@ class SimulationParameters:
     # Scenario label stored with results; does not change model behaviour.
     scenario_name: str = "baseline"
 
+    # Weekday at simulation time zero; subsequent weekdays change at integer days.
+    census_start_weekday: str = "Monday"
+
     # Starting seed for reproducible household and intervention random draws.
     seed: int = 1
+
+    # Independent simulation runs used to report means and central 95% run intervals.
+    monte_carlo_repeats: int = 1
 
  # Regional populations, officer counts and A/B/C splits; illustrative defaults only.
     regions: dict[str, RegionParameters] = dc.field(
@@ -53,6 +63,13 @@ class SimulationParameters:
     )
 
 ##Fixed parameters
+    # Select simple per-knock outcomes or the original answered-door decision tree.
+    field_visit_mode: str = "simple"
+    field_vacancy_probability: float = 0.05
+    field_success_probability_by_slot: dict[str, float] = dc.field(
+        default_factory=lambda: dict.fromkeys(FIELD_VISIT_SLOTS, 0.3)
+    )
+
     # Daily baseline return chances by group for days 1-50; later days use day 50.
     # Each group's first value also sets its time-zero return chance.
     daily_response_probabilities_by_group: dict[str, list[float]] = dc.field(
@@ -71,18 +88,22 @@ class SimulationParameters:
     sms_response_probability: float = 0.3
 
     # One-off return chance after answering, with no doorstep completion or paper order.
-    field_visit_response_probability_if_answer: float = 0.5
+    field_visit_response_probability_if_answer_by_slot: dict[str, float] = dc.field(
+        default_factory=lambda: dict.fromkeys(FIELD_VISIT_SLOTS, 0.3)
+    )
     
     # One-off return chance for eligible households after no answer and no vacancy.
     field_visit_response_probability_if_no_answer: float = 0.2
     
     # Chance a household answers the door during a visit.
-    field_answer_door_probability: float = 0.3
+    field_answer_door_probability_by_slot: dict[str, float] = dc.field(
+        default_factory=lambda: dict.fromkeys(FIELD_VISIT_SLOTS, 0.3)
+    )
     
     # Chance an unanswered visit identifies a vacancy and removes the household.
     field_vacancy_probability_if_no_answer: float = 0.05
 
-    # Daily chance an outstanding paper-first household calls contact centre, if not awaiting paper.
+    # Daily call chance for non-refusing outstanding paper-first households not awaiting paper.
     call_centre_call_probability: float = 0.3
 
     #probability of phone number being available
@@ -98,10 +119,21 @@ class SimulationParameters:
     #response rate to a reminder letter
     reminder_letter_response_probability: float = 0.4
 
-    #probability a household is a refusal
+    # Simulation days on which reminders are posted to all active non-respondents.
+    reminder_letter_days: list[int] = dc.field(default_factory=lambda: [10, 20, 30])
+
+    # Simple-mode probability of becoming a permanent refusal on each knock.
     refusal_probability: float = 0.01
 
-    
+    # Hours per officer in each weekday slot, or per day on Saturday/Sunday.
+    field_officer_working_hours_by_slot: dict[str, float] = dc.field(
+        default_factory=lambda: {
+            "morning": 3.0, "afternoon": 3.0, "evening": 2.0, "weekend": 8.0,
+        }
+    )
+
+    # Number of visits a field officer completes per hour.
+    field_officer_visits_per_hour: float = 3.75
 
 ##Variable parameters
    
@@ -118,7 +150,7 @@ class SimulationParameters:
     # Days used to defer repeat field visits.
     field_days_until_next_visit: int = 3
 
-    # Chance of immediate doorstep completion after answering, if not awaiting paper.
+    # Simple: unconditional per-knock outcome. Detailed: conditional on answering.
     field_doorstep_completion_probability: float = 0.5
 
     # Shared paper questionnaire stock available without an extra printing delay.
@@ -130,15 +162,83 @@ class SimulationParameters:
     # Extra delivery delay in days for each paper order after stock runs out.
     printing_delay: float = 2
 
-    # Maximum visits completed per officer each day, all at the same simulated time.
-    daily_field_visits: int = 30
-
     # Stored intervention prices; no costs are currently calculated in the model.
     intervention_costs: dict[str, float] = dc.field(
         default_factory=lambda: {"sms": 0.05}
     )
 
+    def field_visit_capacities_at(self, simulation_time: float) -> dict[str, int]:
+        """Return whole-visit capacity per active slot for one officer on this day."""
+        slots = (
+            ("weekend",)
+            if self.weekday_at(simulation_time) in ("Saturday", "Sunday")
+            else FIELD_VISIT_SLOTS[:3]
+        )
+        return {
+            slot: math.floor(
+                self.field_officer_working_hours_by_slot[slot] * self.field_officer_visits_per_hour
+            )
+            for slot in slots
+        }
+
+    def weekday_at(self, simulation_time: float) -> str:
+        """Return the weekday at a non-negative simulation time, including fractional days."""
+        if (
+            isinstance(simulation_time, bool)
+            or not isinstance(simulation_time, (int, float))
+            or not math.isfinite(simulation_time)
+            or simulation_time < 0
+        ):
+            raise ValueError("Simulation time must be a finite non-negative number")
+        start_index = WEEKDAYS.index(self.census_start_weekday)
+        return WEEKDAYS[(start_index + math.floor(simulation_time)) % 7]
+
     def __post_init__(self):
+        if self.field_visit_mode not in ("simple", "detailed"):
+            raise ValueError("field_visit_mode must be 'simple' or 'detailed'")
+        for name in (
+            "refusal_probability", "field_vacancy_probability",
+            "field_doorstep_completion_probability",
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or not 0 <= value <= 1
+            ):
+                raise ValueError(f"{name} must be finite and in [0, 1]")
+        if self.census_start_weekday not in WEEKDAYS:
+            raise ValueError("census_start_weekday must be a weekday name from Monday to Sunday")
+        if (
+            not isinstance(self.reminder_letter_days, list)
+            or any(
+                isinstance(day, bool) or not isinstance(day, int) or day < 0
+                for day in self.reminder_letter_days
+            )
+            or len(set(self.reminder_letter_days)) != len(self.reminder_letter_days)
+        ):
+            raise ValueError("reminder_letter_days must be a list of unique non-negative integers")
+        probability = self.reminder_letter_response_probability
+        if (
+            isinstance(probability, bool)
+            or not isinstance(probability, (int, float))
+            or not math.isfinite(probability)
+            or not 0 <= probability <= 1
+        ):
+            raise ValueError("reminder_letter_response_probability must be finite and in [0, 1]")
+        delay = self.pQ_postal_delay
+        if (
+            isinstance(delay, bool)
+            or not isinstance(delay, (int, float))
+            or not math.isfinite(delay)
+            or delay < 0
+        ):
+            raise ValueError("pQ_postal_delay must be finite and non-negative")
+        if (
+            isinstance(self.monte_carlo_repeats, bool)
+            or not isinstance(self.monte_carlo_repeats, int)
+            or self.monte_carlo_repeats < 1
+        ):
+            raise ValueError("monte_carlo_repeats must be a positive integer")
         if not self.regions:
             raise ValueError("At least one region must be configured")
         for name, region in self.regions.items():
@@ -146,12 +246,45 @@ class SimulationParameters:
                 raise ValueError("Each region must have a non-empty name")
             if not isinstance(region, RegionParameters):
                 raise ValueError("Each region must contain RegionParameters")
-        if (
-            isinstance(self.daily_field_visits, bool)
-            or not isinstance(self.daily_field_visits, int)
-            or self.daily_field_visits < 0
+        for name in (
+            "field_officer_working_hours_by_slot",
+            "field_answer_door_probability_by_slot",
+            "field_visit_response_probability_if_answer_by_slot",
+            "field_success_probability_by_slot",
         ):
-            raise ValueError("daily_field_visits must be a non-negative integer")
+            values = getattr(self, name)
+            if not isinstance(values, dict) or set(values) != set(FIELD_VISIT_SLOTS):
+                raise ValueError(f"{name} must contain exactly {FIELD_VISIT_SLOTS}")
+            for value in values.values():
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value < 0
+                    or (name != "field_officer_working_hours_by_slot" and value > 1)
+                ):
+                    raise ValueError(f"{name} must contain finite non-negative hours or probabilities in [0, 1]")
+        if self.field_visit_mode == "simple":
+            for slot, success in self.field_success_probability_by_slot.items():
+                total = math.fsum((
+                    self.field_doorstep_completion_probability, self.refusal_probability,
+                    self.field_vacancy_probability, success,
+                ))
+                if total > 1:
+                    raise ValueError(f"Simple field outcome probabilities for {slot} must sum to at most 1")
+        rate = self.field_officer_visits_per_hour
+        if (
+            isinstance(rate, bool)
+            or not isinstance(rate, (int, float))
+            or not math.isfinite(rate)
+            or rate <= 0
+        ):
+            raise ValueError("field_officer_visits_per_hour must be finite and positive")
+        if any(
+            not math.isfinite(hours * rate)
+            for hours in self.field_officer_working_hours_by_slot.values()
+        ):
+            raise ValueError("Field visit capacity must be finite")
         table = self.daily_response_probabilities_by_group
         if set(table) != {"A", "B", "C"}:
             raise ValueError("Daily response probabilities must include exactly groups A, B and C")
@@ -167,4 +300,3 @@ baseline_parameters = SimulationParameters()
 
 # Example scenario variant. Kept as a usage example, not used as the default run baseline.
 PoC_parameters = dc.replace(baseline_parameters, scenario_name = "PoC_scenario")
-

@@ -13,6 +13,11 @@ class UnitState:
     intervention_lists: il.intervention_lists
     field_officer: simpy.Resource
     return_history: dict
+    field_visit_history: list[dict] = dc.field(default_factory=list)
+    reminder_letter_history: dict = dc.field(default_factory=lambda: {
+        "time": [], "letters_sent": [], "total_letters_sent": 0,
+        "letters_delivered": 0, "responses": 0,
+    })
 
 
 @dc.dataclass

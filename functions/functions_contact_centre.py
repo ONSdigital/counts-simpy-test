@@ -1,4 +1,4 @@
-def deliver_paper_questionnaire(env, household, total_delay):
+def deliver_paper_questionnaire(env, household, total_delay, on_delivery=None):
     """Deliver one posted paper questionnaire after a delay."""
 
     yield env.timeout(total_delay)
@@ -7,6 +7,8 @@ def deliver_paper_questionnaire(env, household, total_delay):
         return
     household.paper_first = False
     household.waiting_for_pq = False
+    if on_delivery is not None:
+        on_delivery()
 
 
 class PaperQuestionnaireService:
@@ -17,7 +19,7 @@ class PaperQuestionnaireService:
         self.postal_delay = postal_delay
         self.printing_delay = printing_delay
 
-    def order_paper_questionnaire(self, env, household):
+    def order_paper_questionnaire(self, env, household, on_delivery=None):
         """Order and dispatch a paper questionnaire for a household."""
 
         household.waiting_for_pq = True
@@ -27,7 +29,7 @@ class PaperQuestionnaireService:
         else:
             total_delivery_delay = self.printing_delay + self.postal_delay
 
-        env.process(deliver_paper_questionnaire(env, household, total_delivery_delay))
+        env.process(deliver_paper_questionnaire(env, household, total_delivery_delay, on_delivery))
 
 
 def process_call_centre_calls(
@@ -38,7 +40,7 @@ def process_call_centre_calls(
     call_centre_history,
     paper_questionnaire_service,
 ):
-    """Run daily call-centre demand with one global call flow.
+    """Run daily call-centre demand, excluding refusing households.
 
     Args:
         env: SimPy environment.
@@ -72,6 +74,7 @@ def process_call_centre_calls(
                 household.is_active
                 and household.paper_first
                 and not household.responded
+                and not household.refusal
                 and not household.waiting_for_pq
             ):
                 if rng.random() < call_probability:

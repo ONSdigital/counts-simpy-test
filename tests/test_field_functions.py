@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 import simpy
 
+from parameters import FIELD_VISIT_SLOTS, SimulationParameters
 from functions.functions_contact_centre import PaperQuestionnaireService
 from functions.functions_field import create_field_officer
 from functions.functions_field import end_of_day_remove_responded_houses
@@ -104,11 +105,17 @@ def test_queue_field_officer_visits_schedules_visit_within_active_window():
             field_officer_list,
             first_day=1,
             last_day=1,
-            response_probability_if_answer=0.2,
             response_probability_if_no_answer=0.1,
-            daily_field_visits=1,
+            scenario_params=SimulationParameters(
+                field_visit_mode="detailed",
+                field_officer_working_hours_by_slot={
+                    "morning": 1.0, "afternoon": 0.0, "evening": 0.0, "weekend": 1.0,
+                },
+                field_officer_visits_per_hour=1.0,
+                field_answer_door_probability_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.5),
+                field_visit_response_probability_if_answer_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.2),
+            ),
             random_source=SequenceRandom([0.9, 0.9, 0.9]),
-            answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=3,
@@ -149,6 +156,8 @@ def test_daily_visit_batches_finish_at_one_timestamp_and_respect_daily_limit(dai
             id=household_id,
             responded=False,
             paper_first=True,
+            refusal=False,
+            is_active=True,
             waiting_for_pq=False,
             next_field_visit_day=0,
             field_knocks=0,
@@ -169,11 +178,17 @@ def test_daily_visit_batches_finish_at_one_timestamp_and_respect_daily_limit(dai
             intervention_lists.field_officer_list,
             first_day=3,
             last_day=4,
-            daily_field_visits=daily_field_visits,
-            response_probability_if_answer=0.2,
+            scenario_params=SimulationParameters(
+                field_visit_mode="detailed",
+                field_officer_working_hours_by_slot={
+                    "morning": daily_field_visits, "afternoon": 0.0,
+                    "evening": 0.0, "weekend": daily_field_visits,
+                },
+                field_officer_visits_per_hour=1.0,
+                field_answer_door_probability_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.5),
+            ),
             response_probability_if_no_answer=0.2,
             random_source=TimedRandom(),
-            answer_door_probability=0.5,
             doorstep_completion_probability=0.5,
             vacancy_probability_if_no_answer=0.1,
             days_until_next_visit=3,
@@ -196,7 +211,10 @@ def test_vacant_household_is_removed_from_population_and_all_lists():
     env = simpy.Environment()
     field_officer = simpy.Resource(env, capacity=1)
 
-    household = SimpleNamespace(id=1, responded=False, field_knocks=0, doorstep_completions=0)
+    household = SimpleNamespace(
+        id=1, responded=False, refusal=False, is_active=True,
+        field_knocks=0, doorstep_completions=0,
+    )
     households = [household]
     intervention_lists = SimpleNamespace(
         sms_list=[household],
@@ -243,6 +261,8 @@ def test_no_answer_non_vacant_household_is_scheduled_for_revisit():
 
     household = SimpleNamespace(
         id=2,
+        refusal=False,
+        is_active=True,
         responded=False,
         paper_first=True,
         waiting_for_pq=False,
@@ -296,6 +316,8 @@ def test_answer_door_keeps_outcome_a_behaviour():
 
     household = SimpleNamespace(
         id=3,
+        refusal=False,
+        is_active=True,
         responded=False,
         paper_first=False,
         waiting_for_pq=False,
@@ -347,6 +369,8 @@ def test_answer_no_completion_orders_pq_when_paper_first_and_not_waiting():
 
     household = SimpleNamespace(
         id=4,
+        refusal=False,
+        is_active=True,
         responded=False,
         paper_first=True,
         waiting_for_pq=False,
@@ -390,6 +414,10 @@ def test_answer_no_completion_orders_pq_when_paper_first_and_not_waiting():
     assert household.waiting_for_pq is True
     assert household.next_field_visit_day == 5
     assert household.field_knocks == 1
+    env.run(until=3)
+    assert household.paper_first is False
+    assert household.waiting_for_pq is False
+    assert household.responded is False
 
 
 @pytest.mark.parametrize("answered", [True, False])
@@ -400,6 +428,7 @@ def test_field_response_attempt_does_not_change_baseline(answered, response_draw
 
     household = SimpleNamespace(
         id=5,
+        is_active=True,
         responded=False,
         refusal=False,
         paper_first=False,
@@ -457,6 +486,8 @@ def test_answering_door_while_waiting_for_pq_increments_next_visit_day():
 
     household = SimpleNamespace(
         id=6,
+        refusal=False,
+        is_active=True,
         responded=False,
         paper_first=True,
         waiting_for_pq=True,
@@ -510,10 +541,11 @@ def test_populate_field_officer_list_only_adds_households_when_knocks_are_at_or_
     env = simpy.Environment()
     field_officer_list = []
     households = [
-        SimpleNamespace(hard_to_count=2, field_knocks=3, responded=False),
-        SimpleNamespace(hard_to_count=2, field_knocks=2, responded=False),
-        SimpleNamespace(hard_to_count=2, field_knocks=1, responded=False),
-        SimpleNamespace(hard_to_count=1, field_knocks=4, responded=True),
+        SimpleNamespace(hard_to_count=2, field_knocks=3, responded=False, refusal=False),
+        SimpleNamespace(hard_to_count=2, field_knocks=2, responded=False, refusal=False),
+        SimpleNamespace(hard_to_count=2, field_knocks=1, responded=False, refusal=False),
+        SimpleNamespace(hard_to_count=1, field_knocks=4, responded=True, refusal=False),
+        SimpleNamespace(hard_to_count=2, field_knocks=0, responded=False, refusal=True),
     ]
 
     env.process(populate_field_officer_list(env, households, field_officer_list))
@@ -524,12 +556,20 @@ def test_populate_field_officer_list_only_adds_households_when_knocks_are_at_or_
     assert households[2] in field_officer_list
 
 
-@pytest.mark.parametrize("value", [-1, 1.5, True])
-def test_daily_field_visits_must_be_a_non_negative_integer(value):
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf"), True, "3", None])
+def test_field_officer_working_hours_must_be_finite_and_non_negative(value):
+    hours = dict.fromkeys(FIELD_VISIT_SLOTS, 0.0)
+    hours["morning"] = value
+    with pytest.raises(ValueError, match="field_officer_working_hours_by_slot"):
+        SimulationParameters(field_officer_working_hours_by_slot=hours)
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf"), True, "3", None])
+def test_field_officer_visits_per_hour_must_be_positive(value):
     from parameters import SimulationParameters
 
-    with pytest.raises(ValueError, match="daily_field_visits"):
-        SimulationParameters(daily_field_visits=value)
+    with pytest.raises(ValueError, match="field_officer_visits_per_hour"):
+        SimulationParameters(field_officer_visits_per_hour=value)
 
 
 @pytest.mark.parametrize("daily_field_visits", [0, 2])
@@ -541,14 +581,19 @@ def test_simulation_applies_daily_visit_allowance_per_officer(daily_field_visits
 
     params = dc.replace(
         baseline_parameters,
+        field_visit_mode="detailed",
         regions={"Test region": RegionParameters(num_households=20, num_field_officers=2)},
-        daily_field_visits=daily_field_visits,
+        field_officer_working_hours_by_slot={
+            "morning": daily_field_visits, "afternoon": 0.0,
+            "evening": 0.0, "weekend": daily_field_visits,
+        },
+        field_officer_visits_per_hour=1.0,
         field_first_day=3,
         field_last_day=4,
         daily_response_probabilities_by_group={group: [0.0] * 50 for group in ("A", "B", "C")},
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
         sms_timing=100,
-        field_answer_door_probability=0.0,
+        field_answer_door_probability_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.0),
         field_vacancy_probability_if_no_answer=0.0,
         field_visit_response_probability_if_no_answer=0.0,
         field_days_until_next_visit=3,
@@ -559,3 +604,170 @@ def test_simulation_applies_daily_visit_allowance_per_officer(daily_field_visits
     assert len(result.units) == 2
     for unit in result.units:
         assert sum(household.field_knocks for household in unit.households) == 2 * daily_field_visits
+
+
+def test_default_slot_capacities_round_down_separately_and_follow_weekdays():
+    params = SimulationParameters()
+
+    assert params.field_visit_capacities_at(0) == {"morning": 11, "afternoon": 11, "evening": 7}
+    assert params.field_visit_capacities_at(4.99) == {"morning": 11, "afternoon": 11, "evening": 7}
+    assert params.field_visit_capacities_at(5) == {"weekend": 30}
+    assert params.field_visit_capacities_at(6.99) == {"weekend": 30}
+    assert params.field_visit_capacities_at(7) == {"morning": 11, "afternoon": 11, "evening": 7}
+    sunday_start = SimulationParameters(census_start_weekday="Sunday")
+    assert sunday_start.field_visit_capacities_at(0) == {"weekend": 30}
+    assert sunday_start.field_visit_capacities_at(1) == {"morning": 11, "afternoon": 11, "evening": 7}
+    assert set(params.field_answer_door_probability_by_slot.values()) == {0.3}
+    assert set(params.field_visit_response_probability_if_answer_by_slot.values()) == {0.3}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "field_officer_working_hours_by_slot",
+        "field_answer_door_probability_by_slot",
+        "field_visit_response_probability_if_answer_by_slot",
+    ],
+)
+@pytest.mark.parametrize("values", [{}, {"morning": 1.0}, dict.fromkeys((*FIELD_VISIT_SLOTS, "night"), 0.3), None])
+def test_slot_parameters_require_exactly_the_four_slots(name, values):
+    with pytest.raises(ValueError, match=name):
+        SimulationParameters(**{name: values})
+
+
+@pytest.mark.parametrize(
+    "name", ["field_answer_door_probability_by_slot", "field_visit_response_probability_if_answer_by_slot"]
+)
+@pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf"), True, "0.3", None])
+def test_slot_probabilities_must_be_finite_numbers_between_zero_and_one(name, value):
+    values = dict.fromkeys(FIELD_VISIT_SLOTS, 0.3)
+    values["evening"] = value
+    with pytest.raises(ValueError, match=name):
+        SimulationParameters(**{name: values})
+
+
+def run_slot_queue(params, first_day=0, last_day=0, household_count=10, field_enabled=True):
+    env = simpy.Environment()
+    households = [
+        SimpleNamespace(
+            id=index, responded=False, refusal=False, paper_first=False,
+            waiting_for_pq=False, next_field_visit_day=0, field_knocks=0,
+            doorstep_completions=0, is_active=True,
+        )
+        for index in range(household_count)
+    ]
+    intervention_lists = SimpleNamespace(
+        sms_list=[], field_officer_list=list(households), reminder_card_list=[],
+    )
+    visits = []
+
+    class ConstantRandom:
+        def random(self):
+            return 0.5
+
+    env.process(
+        queue_field_officer_visits(
+            env, create_field_officer(env), list(households), intervention_lists,
+            intervention_lists.field_officer_list,
+            first_day=first_day, last_day=last_day, scenario_params=params,
+            response_probability_if_no_answer=0.0, random_source=ConstantRandom(),
+            doorstep_completion_probability=0.0, vacancy_probability_if_no_answer=0.0,
+            days_until_next_visit=0, paper_questionnaire_service=PaperQuestionnaireService(10, 2, 1),
+            visit_history=visits, field_enabled=field_enabled,
+        )
+    )
+    env.run(until=last_day + 0.001)
+    return households, visits
+
+
+@pytest.mark.parametrize("slot", FIELD_VISIT_SLOTS)
+@pytest.mark.parametrize("answer_probability,response_probability", [(0.0, 1.0), (1.0, 0.0), (1.0, 1.0)])
+def test_each_slot_uses_its_own_answer_and_response_probabilities(slot, answer_probability, response_probability):
+    hours = dict.fromkeys(FIELD_VISIT_SLOTS, 0.0)
+    hours[slot] = 1.0
+    answers = dict.fromkeys(FIELD_VISIT_SLOTS, 1.0 - answer_probability)
+    answers[slot] = answer_probability
+    responses = dict.fromkeys(FIELD_VISIT_SLOTS, 1.0 - response_probability)
+    responses[slot] = response_probability
+    params = SimulationParameters(
+        census_start_weekday="Saturday" if slot == "weekend" else "Monday",
+        field_visit_mode="detailed",
+        field_officer_working_hours_by_slot=hours, field_officer_visits_per_hour=1.0,
+        field_answer_door_probability_by_slot=answers,
+        field_visit_response_probability_if_answer_by_slot=responses,
+    )
+
+    households, visits = run_slot_queue(params, household_count=1)
+
+    assert visits == [{"time": 0, "household_id": 0, "slot": slot}]
+    assert households[0].responded is (answer_probability == response_probability == 1.0)
+    assert households[0].doorstep_completions == 0
+
+
+def test_slot_batches_are_simultaneous_and_never_repeat_households_within_a_day():
+    params = SimulationParameters(
+        field_visit_mode="detailed",
+        field_officer_working_hours_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 1.0),
+        field_officer_visits_per_hour=1.0,
+        field_answer_door_probability_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.0),
+    )
+
+    households, visits = run_slot_queue(params, first_day=4, last_day=7, household_count=3)
+
+    assert [visit["slot"] for visit in visits if visit["time"] == 4] == ["morning", "afternoon", "evening"]
+    assert [visit["slot"] for visit in visits if visit["time"] == 5] == ["weekend"]
+    assert [visit["slot"] for visit in visits if visit["time"] == 6] == ["weekend"]
+    assert [visit["slot"] for visit in visits if visit["time"] == 7] == ["morning", "afternoon", "evening"]
+    assert len({(visit["time"], visit["household_id"]) for visit in visits}) == len(visits)
+    assert sum(household.field_knocks for household in households) == len(visits) == 8
+
+
+@pytest.mark.parametrize("field_enabled", [False, True])
+def test_zero_hours_or_disabled_officer_produces_no_visits(field_enabled):
+    params = SimulationParameters(field_officer_working_hours_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.0))
+    if not field_enabled:
+        params = SimulationParameters()
+
+    households, visits = run_slot_queue(params, last_day=7, field_enabled=field_enabled)
+
+    assert visits == []
+    assert all(household.field_knocks == 0 for household in households)
+
+
+def test_slots_do_not_exceed_available_households():
+    params = SimulationParameters(
+        field_officer_working_hours_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 1.0),
+        field_officer_visits_per_hour=1.0,
+    )
+    households, visits = run_slot_queue(params, household_count=2)
+
+    assert [visit["slot"] for visit in visits] == ["morning", "afternoon"]
+    assert all(household.field_knocks == 1 for household in households)
+
+
+def test_monte_carlo_reports_slot_visit_counts_with_no_officer_region_disabled():
+    from functions.simulation_runner import run_monte_carlo
+    from parameters import RegionParameters
+
+    params = SimulationParameters(
+        regions={"Active": RegionParameters(20, 2), "Disabled": RegionParameters(20, 0)},
+        field_visit_mode="detailed",
+        monte_carlo_repeats=2,
+        field_first_day=4, field_last_day=6,
+        field_officer_working_hours_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 1.0),
+        field_officer_visits_per_hour=1.0,
+        field_answer_door_probability_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.0),
+        field_vacancy_probability_if_no_answer=0.0,
+        field_visit_response_probability_if_no_answer=0.0,
+        daily_response_probabilities_by_group=dict.fromkeys(("A", "B", "C"), [0.0] * 50),
+        paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
+        sms_timing=100,
+    )
+    result = run_monte_carlo(params, run_until=7, generate_plot=False)
+
+    assert result.overall_summary["field_visits"]["mean"] == 10
+    for slot, expected in (("morning", 2), ("afternoon", 2), ("evening", 2), ("weekend", 4)):
+        key = f"field_visits_{slot}"
+        assert result.overall_summary[key] == {"mean": expected, "lower_95": expected, "upper_95": expected}
+        assert result.region_summaries["Active"][key]["mean"] == expected
+        assert result.region_summaries["Disabled"][key]["mean"] == 0
