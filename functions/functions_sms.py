@@ -3,18 +3,24 @@ def sms_day_n_responses(env, sms_list, n, sms_response_probability, rng, open_ho
 
     Args:
         env: SimPy environment.
-        sms_list: Mutable list of households eligible for SMS.
+        sms_list: Mutable SMS contact list; successful respondents are removed immediately.
         n: Simulation day on which SMS messages are sent.
         sms_response_probability: One-off probability of responding to SMS.
         rng: Random number generator used for SMS response draws.
-        open_households: Optional list from which successful responses are removed.
+        open_households: Optional outstanding list or list of per-unit outstanding
+            lists from which successful responses are removed.
 
     Yields:
-        SimPy timeout events for SMS timing and post-send cleanup.
+        SimPy timeout event for the one-off SMS intervention.
     """
 
     yield env.timeout(n + 0.85)
-    for household in sms_list:
+    outstanding_lists = (
+        open_households
+        if open_households and isinstance(open_households[0], list)
+        else [open_households] if open_households is not None else []
+    )
+    for household in list(sms_list):
         if (
             household.is_active
             and not household.responded
@@ -23,11 +29,11 @@ def sms_day_n_responses(env, sms_list, n, sms_response_probability, rng, open_ho
         ):
             if rng.random() < sms_response_probability:
                 household.responded = True
-                if open_households is not None and household in open_households:
-                    open_households.remove(household)
+                for outstanding in outstanding_lists:
+                    if household in outstanding:
+                        outstanding.remove(household)
+                sms_list.remove(household)
     print(f" Day {env.now}, SMS sent to houses on sms_list. Response attempts completed")
-    yield env.timeout(0.6)
-    sms_list[:] = [household for household in sms_list if household.responded is False]
 
 def populate_sms_list(env, households, sms_list):
     """Populate the SMS list with households eligible for messaging.

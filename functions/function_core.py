@@ -3,7 +3,7 @@ import random
 import functions.functions_field as field
 import functions.functions_households as hh
 import functions.functions_output as out
-import functions.functions_sms as sms
+import functions.functions_reminder_letters as reminders
 import functions.intervention_lists as il
 from functions.simulation_types import RegionState, UnitState
 
@@ -16,6 +16,7 @@ def build_region(
     unit_id_start,
     household_id_start,
     paper_questionnaire_service,
+    sms_list,
 ):
     """Allocate regional household groups and build internal officer units."""
 
@@ -48,6 +49,7 @@ def build_region(
                 household_count,
                 household_id_start + offset,
                 paper_questionnaire_service,
+                sms_list,
                 demographic_groups=groups[offset:offset + household_count],
                 field_enabled=region_params.num_field_officers > 0,
             )
@@ -63,10 +65,11 @@ def build_unit(
     household_count,
     household_id_start,
     paper_questionnaire_service,
+    sms_list,
     demographic_groups=None,
     field_enabled=True,
 ):
-    """Build one independent simulation unit and register its processes."""
+    """Build one officer unit sharing the national SMS list and register local processes."""
 
     unit_rng = random.Random(scenario_params.seed + unit_id)
     households = [
@@ -84,10 +87,20 @@ def build_unit(
         household.baseline_response_probability = initial_probability
         household.response_probability = initial_probability
 
-    unit_intervention_lists = il.intervention_lists()
+    unit_intervention_lists = il.intervention_lists(sms_list=sms_list)
     unit_field_officer = field.create_field_officer(env)
     unit_return_history = out.initialise_household_return_history(households)
     open_households = []
+    field_visit_history = []
+    unit = UnitState(
+        unit_id=unit_id,
+        households=households,
+        open_households=open_households,
+        intervention_lists=unit_intervention_lists,
+        field_officer=unit_field_officer,
+        return_history=unit_return_history,
+        field_visit_history=field_visit_history,
+    )
 
     env.process(hh.first_day_responses(env, households, unit_rng, open_households))
     env.process(out.record_household_return_proportions(env, households, unit_return_history))
@@ -98,19 +111,18 @@ def build_unit(
             unit_rng,
             scenario_params.daily_response_probabilities_by_group,
             open_households,
+            sms_list=unit_intervention_lists.sms_list,
         )
     )
     env.process(
-        sms.sms_day_n_responses(
-            env,
-            unit_intervention_lists.sms_list,
-            scenario_params.sms_timing,
-            scenario_params.sms_response_probability,
-            unit_rng,
-            open_households,
+        reminders.send_reminder_letters(
+            env, households, scenario_params.reminder_letter_days,
+            scenario_params.pQ_postal_delay,
+            scenario_params.reminder_letter_response_probability,
+            random.Random(f"{scenario_params.seed}:{unit_id}:reminder_letters"),
+            open_households, unit_intervention_lists, unit.reminder_letter_history,
         )
     )
-    env.process(sms.populate_sms_list(env, open_households, unit_intervention_lists.sms_list))
     env.process(
         field.populate_field_officer_list(
             env,
@@ -127,11 +139,11 @@ def build_unit(
             unit_intervention_lists.field_officer_list,
             first_day=scenario_params.field_first_day,
             last_day=scenario_params.field_last_day,
-            response_probability_if_answer=scenario_params.field_visit_response_probability_if_answer,
             response_probability_if_no_answer=scenario_params.field_visit_response_probability_if_no_answer,
-            daily_field_visits=scenario_params.daily_field_visits if field_enabled else 0,
+            scenario_params=scenario_params,
+            field_enabled=field_enabled,
+            visit_history=field_visit_history,
             random_source=unit_rng,
-            answer_door_probability=scenario_params.field_answer_door_probability,
             doorstep_completion_probability=scenario_params.field_doorstep_completion_probability,
             vacancy_probability_if_no_answer=scenario_params.field_vacancy_probability_if_no_answer,
             days_until_next_visit=scenario_params.field_days_until_next_visit,
@@ -146,11 +158,4 @@ def build_unit(
         )
     )
 
-    return UnitState(
-        unit_id=unit_id,
-        households=households,
-        open_households=open_households,
-        intervention_lists=unit_intervention_lists,
-        field_officer=unit_field_officer,
-        return_history=unit_return_history,
-    )
+    return unit

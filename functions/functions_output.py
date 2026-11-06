@@ -2,6 +2,77 @@ import math
 import textwrap
 
 import matplotlib.pyplot as plt
+import numpy as np
+
+
+def summarise_monte_carlo_values(values):
+    """Return the mean and central 95% percentile interval across runs."""
+
+    return {
+        "mean": float(np.mean(values)),
+        "lower_95": float(np.quantile(values, 0.025)),
+        "upper_95": float(np.quantile(values, 0.975)),
+    }
+
+
+def summarise_monte_carlo_histories(histories):
+    """Combine aligned run histories using means and pointwise run intervals."""
+
+    first = histories[0]
+    if any(history["time"] != first["time"] for history in histories):
+        raise ValueError("Monte Carlo history timestamps must match")
+    combined = {
+        "time": list(first["time"]),
+        "total_households": first["total_households"],
+        "group_sizes": dict(first["group_sizes"]),
+    }
+    for key in ("responded_count", "active_households", "proportion_returned"):
+        values = np.asarray([history[key] for history in histories], dtype=float)
+        combined[key] = np.mean(values, axis=0).tolist()
+        combined[f"{key}_lower_95"] = np.quantile(values, 0.025, axis=0).tolist()
+        combined[f"{key}_upper_95"] = np.quantile(values, 0.975, axis=0).tolist()
+    for key in ("group_active_households", "group_proportion_returned"):
+        combined[key] = {}
+        combined[f"{key}_lower_95"] = {}
+        combined[f"{key}_upper_95"] = {}
+        for group in first[key]:
+            values = np.asarray([history[key][group] for history in histories], dtype=float)
+            combined[key][group] = np.mean(values, axis=0).tolist()
+            combined[f"{key}_lower_95"][group] = np.quantile(values, 0.025, axis=0).tolist()
+            combined[f"{key}_upper_95"][group] = np.quantile(values, 0.975, axis=0).tolist()
+    return combined
+
+
+def monte_carlo_summary_rows(summary):
+    """Prepare overall summary rows with return proportions expressed as percentages."""
+
+    measures = (
+        ("total_households", "Initial households", 1),
+        ("responded_count", "Returned", 1),
+        ("active_households", "Active households", 1),
+        ("proportion_returned", "Returned (%)", 100),
+        ("total_calls", "Call-centre calls", 1),
+        ("total_letters_sent", "Reminder letters sent", 1),
+        ("letters_delivered", "Reminder letters delivered", 1),
+        ("reminder_letter_responses", "Reminder letter responses", 1),
+        ("field_visits", "Field visits", 1),
+        ("simple_field_successes", "Simple field successes", 1),
+        ("field_visits_morning", "Morning visits", 1),
+        ("field_visits_afternoon", "Afternoon visits", 1),
+        ("field_visits_evening", "Evening visits", 1),
+        ("field_visits_weekend", "Weekend visits", 1),
+        ("doorstep_completions", "Doorstep completions", 1),
+    )
+    return [
+        {
+            "Measure": label,
+            "Mean": scale * summary[key]["mean"],
+            "95% lower": scale * summary[key]["lower_95"],
+            "95% upper": scale * summary[key]["upper_95"],
+        }
+        for key, label, scale in measures
+        if key in summary
+    ]
 
 
 def initialise_call_centre_history():
@@ -234,6 +305,7 @@ def plot_household_return_proportions(
     show_plot=False,
     output_path=None,
     region_histories=None,
+    reminder_letter_days=None,
 ):
     """Plot the overall response curves above named regional panels.
 
@@ -247,6 +319,7 @@ def plot_household_return_proportions(
         output_path: Optional image path to save the chart.
         region_histories: Optional mapping of region names to history dictionaries,
             shown in a grid below the overall chart.
+        reminder_letter_days: Optional reminder sending days, not delivery days.
     """
 
     all_groups = set(history.get("group_proportion_returned", {}).keys())
@@ -261,12 +334,22 @@ def plot_household_return_proportions(
     }
 
     def draw_response_curves(axis, chart_history, include_labels):
+        has_interval = "proportion_returned_lower_95" in chart_history
+        if has_interval:
+            axis.fill_between(
+                chart_history["time"],
+                chart_history["proportion_returned_lower_95"],
+                chart_history["proportion_returned_upper_95"],
+                color="black",
+                alpha=0.12,
+                label="95% run interval" if include_labels else None,
+            )
         axis.plot(
             chart_history["time"],
             chart_history["proportion_returned"],
             linewidth=2.2,
             color="black",
-            label="Overall" if include_labels else None,
+            label=("Mean overall" if has_interval else "Overall") if include_labels else None,
         )
         for group in ordered_groups:
             proportions = chart_history.get("group_proportion_returned", {}).get(group)
@@ -297,6 +380,16 @@ def plot_household_return_proportions(
                 linewidth=1.6,
                 label="Field visits start" if include_labels else None,
             )
+
+        if reminder_letter_days is not None:
+            for index, day in enumerate(sorted(set(reminder_letter_days))):
+                axis.axvline(
+                    day,
+                    color="tab:purple",
+                    linestyle="--",
+                    linewidth=1.6,
+                    label="Reminder letters sent" if include_labels and index == 0 else None,
+                )
 
         axis.set_ylim(0, 1)
         axis.grid(True, alpha=0.25)
@@ -369,4 +462,3 @@ if __name__ == "__main__":
         "functions_output.py is a helper module and does not run a simulation on its own. "
         "Run simulation.py from the project root to execute the model."
     )
-
