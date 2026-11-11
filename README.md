@@ -401,7 +401,13 @@ daily_response_probabilities_by_group={
 The defaults are a flat 0.05 for every group and day. There is no automatic
 daily decay. Interventions never modify the baseline table or add to daily
 response probabilities. Instead, SMS makes one response attempt per eligible
-household with probability `sms_response_probability` (default 0.3). Eligible
+household on each configured sending day with probability
+`sms_response_probability` (default 0.3). Set `sms_days`, for example
+`[10, 20, 30]`, just like `reminder_letter_days`. The default is `[20]`;
+an empty list disables SMS. Days must be unique non-negative integers and are
+scheduled chronologically at `day + 0.85`. The app supports multiple selections
+and plots mark every sending day. Eligible non-respondents can receive SMS on
+later scheduled days; successful respondents are removed immediately. Eligible
 field visits make one response attempt with probability
 `field_visit_response_probability_if_answer_by_slot` (default 0.3 per slot) when there is no
 doorstep completion or paper order, or

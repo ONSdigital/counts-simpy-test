@@ -91,7 +91,7 @@ The model runs on a SimPy environment. A typical run follows this high-level flo
 
    * first-day responses,
    * daily household response updates,
-   * SMS list population and one-off SMS response attempts,
+   * SMS list population and per-sending-day SMS response attempts,
    * field-officer list population and visit scheduling,
    * response-history collection for plotting.
 
@@ -252,11 +252,14 @@ Important parameters include:
    response attempts without changing the table. Defaults are 0.05 for all groups and days.
    Each group's first value also sets its time-zero response probability.
 
-``sms_timing``
-   Simulation day on which the one-off SMS response attempts occur.
+``sms_days``
+   List of unique non-negative integer sending days (default ``[20]``).
+   An empty list disables SMS. Days are sorted for scheduling at ``day + 0.85``,
+   matching reminder-letter sending. Eligible non-respondents can receive
+   another SMS on each later configured day.
 
 ``sms_response_probability``
-   One-off probability of responding to SMS (default 0.3).
+   Probability of responding to each SMS (default 0.3).
 
 ``reminder_letter_days``
    List of unique non-negative integer sending days, under fixed parameters
@@ -415,20 +418,21 @@ Module And API Reference
 ``functions.functions_sms`` module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Each run registers one national selection process and one SMS intervention.
+Each run registers one national selection process and one SMS scheduling process.
 All officer units reference the same central SMS list so daily responses,
 field outcomes and reminder responses remove contacts immediately.
 SMS uses a dedicated reproducible random stream. Each Monte Carlo repeat
 starts with a fresh national list; regional response reporting is preserved.
 
-.. py:function:: sms_day_n_responses(env, sms_list, n, sms_response_probability, rng, open_households=None)
+.. py:function:: send_sms(env, sms_list, sending_days, sms_response_probability, rng, open_households=None)
 
-   SimPy process that waits until time ``n + 0.85`` and makes a single response
+   SimPy process that loops over sorted sending days, waits until
+   ``day + 0.85`` and makes one response
    draw for each active, outstanding, non-refusing, non-paper-first household
    in ``sms_list``. Success records an immediate return and removes the household
    from the open and SMS lists immediately. Failure has no lasting effect on
-   daily probabilities. The process finishes after the one-off intervention;
-   there is no delayed housekeeping check.
+   daily probabilities. Eligibility is rechecked on every sending day.
+   The process finishes after the final send; there is no delayed housekeeping check.
 
 .. py:function:: populate_sms_list(env, households, sms_list)
 
@@ -531,7 +535,7 @@ starts with a fresh national list; regional response reporting is preserved.
 
    The process then repeats once per simulated day.
 
-.. py:function:: plot_household_return_proportions(history, sms_day=None, field_first_day=None, call_centre_history=None, show_plot=False, output_path=None, region_histories=None, reminder_letter_days=None)
+.. py:function:: plot_household_return_proportions(history, sms_days=None, field_first_day=None, call_centre_history=None, show_plot=False, output_path=None, region_histories=None, reminder_letter_days=None)
 
    ``reminder_letter_days`` adds purple dashed sending-day markers to every
    overall and regional panel, with one shared legend entry. Postal delay is

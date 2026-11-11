@@ -142,7 +142,7 @@ def run_monte_carlo(
     if generate_plot:
         out.plot_household_return_proportions(
             aggregate_history,
-            sms_day=scenario_params.sms_timing,
+            sms_days=scenario_params.sms_days,
             field_first_day=scenario_params.field_first_day,
             call_centre_history=call_centre_history,
             show_plot=show_plot,
@@ -214,8 +214,8 @@ def run_simulation(
     all_households = [household for unit in units for household in unit.households]
     env.process(sms.populate_sms_list(env, all_households, sms_list))
     env.process(
-        sms.sms_day_n_responses(
-            env, sms_list, scenario_params.sms_timing,
+        sms.send_sms(
+            env, sms_list, scenario_params.sms_days,
             scenario_params.sms_response_probability,
             random.Random(f"{scenario_params.seed}:national_sms"),
             all_open_household_lists,
@@ -277,7 +277,7 @@ def run_simulation(
     if generate_plot:
         out.plot_household_return_proportions(
             aggregate_history,
-            sms_day=scenario_params.sms_timing,
+            sms_days=scenario_params.sms_days,
             field_first_day=scenario_params.field_first_day,
             call_centre_history=call_centre_history,
             show_plot=show_plot,

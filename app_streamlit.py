@@ -127,12 +127,11 @@ with st.sidebar:
         value=base_params.field_last_day,
         step=1,
     )
-    sms_timing = st.number_input(
-        "SMS day",
-        min_value=1,
-        max_value=100,
-        value=base_params.sms_timing,
-        step=1,
+    sms_days = st.multiselect(
+        "SMS sending days",
+        options=sorted(set(range(121)) | set(base_params.sms_days)),
+        default=base_params.sms_days,
+        help="Send to eligible non-respondents on each selected day. Empty disables SMS.",
     )
     st.subheader("Reminder letters")
     reminder_letter_days = st.multiselect(
@@ -238,7 +237,7 @@ elif run_clicked and configured_regions is not None:
         field_officer_visits_per_hour=field_officer_visits_per_hour,
         field_first_day=field_first_day,
         field_last_day=field_last_day,
-        sms_timing=sms_timing,
+        sms_days=sms_days,
         reminder_letter_days=reminder_letter_days,
         reminder_letter_response_probability=reminder_letter_response_probability,
         daily_response_probabilities_by_group={
@@ -280,7 +279,7 @@ elif run_clicked and configured_regions is not None:
     with st.spinner("Rendering plots..."):
         out.plot_household_return_proportions(
             result.aggregate_history,
-            sms_day=scenario_params.sms_timing,
+            sms_days=scenario_params.sms_days,
             field_first_day=scenario_params.field_first_day,
             call_centre_history=result.call_centre_history,
             show_plot=False,

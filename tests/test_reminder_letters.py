@@ -137,7 +137,7 @@ def reminder_scenario(**kwargs):
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
         reminder_letter_days=[3], reminder_letter_response_probability=1.0,
         pQ_postal_delay=2, printing_delay=100, initial_paper_batch=0,
-        field_first_day=100, sms_timing=100,
+        field_first_day=100, sms_days=[100],
     )
     values.update(kwargs)
     return SimulationParameters(**values)
@@ -185,7 +185,7 @@ def test_monte_carlo_reports_overall_and_regional_letter_totals_reproducibly():
 
 
 def test_sms_and_reminder_delivery_can_share_a_timestamp_without_double_response():
-    params = reminder_scenario(sms_timing=5, sms_response_probability=0.0)
+    params = reminder_scenario(sms_days=[5], sms_response_probability=0.0)
     run = run_simulation(params, run_until=5.9, generate_plot=False)
 
     assert run.units[0].reminder_letter_history["responses"] == 4

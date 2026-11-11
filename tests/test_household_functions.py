@@ -245,7 +245,7 @@ def test_interventions_return_households_without_changing_baseline_tables(interv
         field_visit_mode="detailed",
         daily_response_probabilities_by_group=probabilities,
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
-        sms_timing=0 if intervention == "sms" else 100,
+        sms_days=[0] if intervention == "sms" else [100],
         sms_response_probability=1.0,
         field_first_day=100 if intervention == "sms" else 3,
         field_last_day=3,
@@ -316,7 +316,7 @@ def test_regions_share_clock_and_use_their_own_population_and_group_splits():
         daily_response_probabilities_by_group={"A": [1.0] * 50, "B": [0.0] * 50, "C": [0.0] * 50},
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
         field_first_day=100,
-        sms_timing=100,
+        sms_days=[100],
     )
 
     result = run_simulation(params, run_until=3, generate_plot=False)
@@ -397,7 +397,7 @@ def test_monte_carlo_repeats_use_distinct_reproducible_seeds_and_summarise_actua
         daily_response_probabilities_by_group={group: [0.2] * 50 for group in ("A", "B", "C")},
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
         field_first_day=100,
-        sms_timing=100,
+        sms_days=[100],
     )
     result = run_monte_carlo(params, run_until=3, generate_plot=False)
     repeated = run_monte_carlo(params, run_until=3, generate_plot=False)

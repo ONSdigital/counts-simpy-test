@@ -35,7 +35,7 @@ flowchart TB
         MC_SAVE --> MC_MORE{"Another repeat to run?"}
         MC_MORE -- "Yes: use the next seed" --> MC_NEW
         MC_MORE -- "No" --> MC_SUMMARY["Across repeats, calculate means and the<br/>2.5th and 97.5th percentiles<br/>These describe run variation, not confidence in the mean"]
-        MC_SUMMARY --> MC_REPORT["Report regional and overall summaries<br/>Plot response trajectories and daily contact-centre calls<br/>Mark field start, SMS day and reminder SENDING days<br/>Show variation across runs when repeats are used"]
+        MC_SUMMARY --> MC_REPORT["Report regional and overall summaries<br/>Plot response trajectories and daily contact-centre calls<br/>Mark field start, SMS days and reminder SENDING days<br/>Show variation across runs when repeats are used"]
     end
 
     subgraph GENERATE["2. Generate regions, officer units and households"]
@@ -183,14 +183,14 @@ flowchart TB
     end
     CLK_KIND -- "Questionnaire delivery" --> PAPER_ARRIVE
 
-    subgraph SMS["10. One-off national text-message intervention"]
-        SMS_ELIG{"On the configured SMS day + 0.85:<br/>On the SMS list, active, outstanding,<br/>not refusing and no longer needing paper?"}
+    subgraph SMS["10. Scheduled national text-message interventions"]
+        SMS_ELIG{"On each configured SMS day + 0.85:<br/>On the SMS list, active, outstanding,<br/>not refusing and no longer needing paper?"}
         SMS_ELIG -- "No" --> CLK_DONE
         SMS_ELIG -- "Yes" --> SMS_DRAW{"Does the household respond to the text message?<br/>Use the SMS response chance"}
         SMS_DRAW -- "Yes" --> SMS_RESP["Respond immediately<br/>Remove from the outstanding and SMS lists immediately"]
         SMS_DRAW -- "No" --> CLK_DONE
         SMS_RESP --> CLK_DONE
-        SMS_DEFAULT["Default: one SMS intervention on day 20<br/>One-off response chance: 30%<br/>No separate message-delivery delay is modelled"]
+        SMS_DEFAULT["Default: SMS days = [20]; multiple days supported<br/>Response chance per send: 30%; unsuccessful households can be retried<br/>An empty schedule disables SMS; no separate delivery delay is modelled"]
         SMS_DRAW -.-> SMS_DEFAULT
     end
     CLK_KIND -- "SMS intervention" --> SMS_ELIG

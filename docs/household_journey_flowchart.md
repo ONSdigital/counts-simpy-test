@@ -20,14 +20,15 @@ flowchart TD
     S1 -- Yes --> S2["Add to sms_list"]
     S1 -- No --> S3["Do not add"]
 
-    S2 --> S4["t=sms_timing+0.85<br/>One national SMS send"]
+    S2 --> S4["t=day+0.85 for each sorted sms_days entry<br/>One national SMS send per configured day"]
     S3 --> S4
     S4 --> S6{"Listed, active, not responded,<br/>not refusing, not paper-first?"}
     S6 -- Yes --> S7{"rand < sms_response_probability?"}
     S7 -- Yes --> S8["responded=True<br/>remove from open households and sms_list immediately"]
-    S6 -- No --> SMS_END["End one-off SMS intervention<br/>No delayed cleanup"]
+    S6 -- No --> SMS_END["End this day's SMS intervention<br/>No delayed cleanup"]
     S7 -- No --> SMS_END
     S8 --> SMS_END
+    SMS_END -- More configured days --> S4
 
     P --> D0["t=1.8, 2.8, 3.8...<br/>Daily response loop"]
     D0 --> D4["Read group/day baseline table<br/>days after 50 use day 50<br/>no intervention carryover"]

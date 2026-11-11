@@ -299,7 +299,7 @@ def record_household_return_proportions(env, households, history):
 
 def plot_household_return_proportions(
     history,
-    sms_day=None,
+    sms_days=None,
     field_first_day=None,
     call_centre_history=None,
     show_plot=False,
@@ -311,7 +311,7 @@ def plot_household_return_proportions(
 
     Args:
         history: Output-series dictionary created during the simulation run.
-        sms_day: Optional simulation day on which SMS messages are sent.
+        sms_days: Optional simulation days on which SMS messages are sent.
         field_first_day: Optional first simulation day on which field visits begin.
         call_centre_history: Optional call-centre history dictionary containing
             daily call counts. Included for compatibility but not plotted.
@@ -363,14 +363,15 @@ def plot_household_return_proportions(
                 label=f"Group {group}" if include_labels else None,
             )
 
-        if sms_day is not None:
-            axis.axvline(
-                sms_day,
-                color="tab:orange",
-                linestyle=":",
-                linewidth=1.6,
-                label="SMS sent" if include_labels else None,
-            )
+        if sms_days is not None:
+            for index, day in enumerate(sorted(set(sms_days))):
+                axis.axvline(
+                    day,
+                    color="tab:orange",
+                    linestyle=":",
+                    linewidth=1.6,
+                    label="SMS sent" if include_labels and index == 0 else None,
+                )
 
         if field_first_day is not None:
             axis.axvline(
