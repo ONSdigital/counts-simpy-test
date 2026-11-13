@@ -159,10 +159,20 @@ working slots. Other response and intervention processes retain their timing.
 ### Monte Carlo Repeats
 
 `monte_carlo_repeats` is a positive integer controlling how many independent
-runs the app or script performs (default 10). Set it in `parameters.py` or use
+runs the app or script performs (default 1). Set it in `parameters.py` or use
 the app's **Monte Carlo repeats** control. Each repeat starts a fresh model,
 including household states, clock, call centre and shared paper stock.
 Distinct seeds are derived reproducibly from the scenario's starting `seed`.
+Unit random generators use the run seed plus their unit ID. The call centre
+uses the run seed plus the maximum unit ID plus one, avoiding unit-seed
+collisions even with more than 10,000 units. Repeat seed spacing keeps these
+integer seed ranges separate across runs. This replaces the previous fixed
+call-centre offset of 10,000, so exact seeded call outcomes can change.
+Regional demographic shuffling uses a separate labelled seed,
+`f"{run_seed}:{region_name}:group_shuffle"`, rather than reusing the first
+unit's seed. It remains reproducible without reserving another numeric offset.
+This changes seeded group placement and can change subsequent outcomes,
+but preserves each region's group totals.
 Repeats run sequentially; regions within each repeat share one clock.
 
 The overall table reports the mean and the 2.5th/97.5th percentiles of each

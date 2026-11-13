@@ -228,7 +228,9 @@ def run_simulation(
         )
     )
     call_centre_history = out.initialise_call_centre_history()
-    call_centre_rng = random.Random(scenario_params.seed + 10_000)
+    call_centre_rng = random.Random(
+        scenario_params.seed + max(unit.unit_id for unit in units) + 1
+    )
     env.process(
         cc.process_call_centre_calls(
             env,

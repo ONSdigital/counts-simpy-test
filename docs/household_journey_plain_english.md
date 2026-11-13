@@ -26,20 +26,23 @@ flowchart TB
 
     subgraph RUNS["1. Scenario setup and Monte Carlo repeats"]
         MC_START["Choose the scenario<br/>Regional populations and group shares, officer numbers,<br/>response chances, intervention dates, working hours,<br/>postal delays, starting weekday and run length"]
-        MC_START --> MC_SEEDS["Choose the number of repeats and a starting random seed<br/>Prepare a different reproducible seed for each repeat"]
+        MC_START --> MC_SEEDS["Choose the number of repeats (default 1) and a starting random seed<br/>Prepare a different reproducible seed for each repeat<br/>Keep the same scenario settings for every repeat"]
         MC_SEEDS --> MC_NEW["Start the next repeat from scratch<br/>No households, lists, stock or outstanding post carry over"]
         MC_NEW --> MC_SHARED["All regions take part in the same census period<br/>Share a central supply of paper questionnaires<br/>Use one national SMS list and text-message intervention<br/>Consider contact-centre demand across all regions"]
         MC_END["Stop this repeat at the chosen time<br/>Events exactly at or after the stop time do not run<br/>Some post may still be in transit"]
         MC_END --> MC_AGG["Combine officer-unit histories into regions,<br/>then combine regions into overall results"]
-        MC_AGG --> MC_SAVE["Retain this repeat's daily response and call histories<br/>Final snapshot response counts and active population<br/>Total visits and visits by slot, doorstep completions,<br/>simple successes, calls, letters sent, delivered and reminder responses"]
+        MC_AGG --> MC_SAVE["Temporarily keep this repeat's daily response and call histories for averaging<br/>Final snapshot response counts and active population<br/>Total visits and visits by slot, doorstep completions,<br/>simple successes, calls, letters sent, delivered and reminder responses"]
         MC_SAVE --> MC_MORE{"Another repeat to run?"}
         MC_MORE -- "Yes: use the next seed" --> MC_NEW
         MC_MORE -- "No" --> MC_SUMMARY["Across repeats, calculate means and the<br/>2.5th and 97.5th percentiles<br/>These describe run variation, not confidence in the mean"]
-        MC_SUMMARY --> MC_REPORT["Report regional and overall summaries<br/>Plot response trajectories and daily contact-centre calls<br/>Mark field start, SMS days and reminder SENDING days<br/>Show variation across runs when repeats are used"]
+        MC_SUMMARY --> MC_REPORT["Report regional and overall summaries<br/>Plot mean response trajectories, with a shaded 95% run interval<br/>for the overall curve in each national or regional panel<br/>Show group mean curves without shaded bands<br/>Mark field start, SMS days and reminder SENDING days"]
+        MC_REPORT --> MC_RETAIN["Return combined results and the run seeds only<br/>Individual run histories and household states are not saved separately<br/>Daily calls are summarised but not plotted<br/>With one repeat, the mean and both interval bounds equal its result"]
     end
 
     subgraph GENERATE["2. Generate regions, officer units and households"]
         GEN_GROUPS["Represent the households in each region<br/>Match the chosen numbers in groups A, B and C<br/>Mix the groups before assigning officer workloads"]
+        GEN_SEEDS["Use separate reproducible random draws for regional mixing,<br/>unit behaviour, contact-centre calls, national SMS and reminder letters<br/>All derive from this repeat's seed"]
+        GEN_GROUPS -.-> GEN_SEEDS
         GEN_GROUPS --> GEN_UNITS["Give officers roughly equal numbers of households to cover<br/>Households in regions without officers can still use other response routes"]
         GEN_UNITS --> GEN_HOUSE["Identify each household's region,<br/>household group and responsible officer"]
         GEN_HOUSE --> GEN_TRAITS["Identify whether the household needs a paper questionnaire,<br/>can be contacted by text message and how hard it is to count"]

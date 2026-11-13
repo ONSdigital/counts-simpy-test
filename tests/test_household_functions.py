@@ -333,6 +333,50 @@ def test_regions_share_clock_and_use_their_own_population_and_group_splits():
     assert len({household.id for region in result.regions for household in region.households}) == 16
 
 
+@pytest.mark.parametrize("seed", [7, 10008])
+def test_regional_shuffle_has_its_own_reproducible_labelled_seed(monkeypatch, seed):
+    import dataclasses as dc
+    import random
+    from collections import Counter
+
+    from functions.simulation_runner import run_simulation
+    from parameters import baseline_parameters
+
+    original_random = random.Random
+    generator_states = {}
+
+    def capture_generator(value):
+        generator = original_random(value)
+        generator_states[value] = generator.getstate()
+        return generator
+
+    monkeypatch.setattr("functions.function_core.random.Random", capture_generator)
+    params = dc.replace(
+        baseline_parameters,
+        seed=seed,
+        regions={
+            "North East": RegionParameters(12, 2, {"A": 0.5, "B": 0.25, "C": 0.25}),
+            "Wales": RegionParameters(12, 1, {"A": 0.5, "B": 0.25, "C": 0.25}),
+        },
+    )
+    result = run_simulation(params, run_until=1, generate_plot=False)
+    repeated = run_simulation(params, run_until=1, generate_plot=False)
+    shuffle_states = []
+    for region, repeated_region in zip(result.regions, repeated.regions, strict=True):
+        shuffle_seed = f"{seed}:{region.name}:group_shuffle"
+        expected = ["A"] * 6 + ["B"] * 3 + ["C"] * 3
+        original_random(shuffle_seed).shuffle(expected)
+        assert [h.demographic_group for h in region.households] == expected
+        assert Counter(expected) == {"A": 6, "B": 3, "C": 3}
+        assert [vars(h) for h in region.households] == [
+            vars(h) for h in repeated_region.households
+        ]
+        shuffle_states.append(generator_states[shuffle_seed])
+    assert len(set(shuffle_states)) == 2
+    unit_states = {generator_states[seed + unit.unit_id] for unit in result.units}
+    assert not unit_states.intersection(shuffle_states)
+
+
 def test_region_splits_round_to_population_and_zero_officers_disable_visits():
     import dataclasses as dc
     from collections import Counter
