@@ -84,7 +84,7 @@ class SimulationParameters:
         default_factory=lambda: {"A": 0.9, "B": 0.1, "C": 0.5}
     )
 
-    # One-off chance an eligible household returns when SMS is sent.
+    # Chance an eligible household returns on each SMS sending day.
     sms_response_probability: float = 0.3
 
     # One-off return chance after answering, with no doorstep completion or paper order.
@@ -138,8 +138,8 @@ class SimulationParameters:
 ##Variable parameters
    
 
-    # Day of the single SMS send, late in the simulated day.
-    sms_timing: int = 20
+    # Simulation days on which SMS messages are sent, late in each day.
+    sms_days: list[int] = dc.field(default_factory=lambda: [20])
     
     # First day officers launch visits.
     field_first_day: int = 7
@@ -208,15 +208,17 @@ class SimulationParameters:
                 raise ValueError(f"{name} must be finite and in [0, 1]")
         if self.census_start_weekday not in WEEKDAYS:
             raise ValueError("census_start_weekday must be a weekday name from Monday to Sunday")
-        if (
-            not isinstance(self.reminder_letter_days, list)
-            or any(
-                isinstance(day, bool) or not isinstance(day, int) or day < 0
-                for day in self.reminder_letter_days
-            )
-            or len(set(self.reminder_letter_days)) != len(self.reminder_letter_days)
-        ):
-            raise ValueError("reminder_letter_days must be a list of unique non-negative integers")
+        for name in ("sms_days", "reminder_letter_days"):
+            days = getattr(self, name)
+            if (
+                not isinstance(days, list)
+                or any(
+                    isinstance(day, bool) or not isinstance(day, int) or day < 0
+                    for day in days
+                )
+                or len(set(days)) != len(days)
+            ):
+                raise ValueError(f"{name} must be a list of unique non-negative integers")
         probability = self.reminder_letter_response_probability
         if (
             isinstance(probability, bool)

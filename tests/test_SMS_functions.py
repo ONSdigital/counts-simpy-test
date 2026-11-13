@@ -1,10 +1,9 @@
 from types import SimpleNamespace
 import dataclasses as dc
-
 import pytest
 import simpy
 
-from functions.functions_sms import sms_day_n_responses
+from functions.functions_sms import send_sms
 from functions.functions_sms import populate_sms_list
 from functions.functions_households import daily_response_updates
 from functions.simulation_runner import run_simulation, run_monte_carlo
@@ -29,7 +28,7 @@ def test_sms_makes_one_off_attempts_without_changing_baseline():
 	sms_list = list(households)
 	open_households = list(households)
 
-	env.process(sms_day_n_responses(env, sms_list, 3, 0.3, SequenceRandom([0.1, 0.8]), open_households))
+	env.process(send_sms(env, sms_list, [3], 0.3, SequenceRandom([0.1, 0.8]), open_households))
 
 	env.run(until=2)
 
@@ -53,7 +52,7 @@ def test_sms_skips_households_ineligible_at_send_time(state):
 	household = SimpleNamespace(response_probability=0.05, responded=False, is_active=True, refusal=False, paper_first=False)
 	for name, value in state.items():
 		setattr(household, name, value)
-	env.process(sms_day_n_responses(env, [household], 0, 1.0, SequenceRandom([])))
+	env.process(send_sms(env, [household], [0], 1.0, SequenceRandom([])))
 	env.run(until=2)
 	assert household.responded is state.get("responded", False)
 	assert household.response_probability == 0.05
@@ -106,7 +105,7 @@ def test_daily_response_on_day_nine_removes_household_before_day_ten_sms():
 		{"A": [0.0] * 8 + [1.0] + [0.0] * 41},
 		open_households, sms_list=sms_list,
 	))
-	env.process(sms_day_n_responses(env, sms_list, 10, 1.0, SequenceRandom([])))
+	env.process(send_sms(env, sms_list, [10], 1.0, SequenceRandom([])))
 
 	env.run(until=9.7)
 	assert sms_list == [household]
@@ -127,7 +126,7 @@ def test_simulation_wires_immediate_sms_removal_for_daily_responses():
 			group: [0.0] * 8 + [1.0] + [0.0] * 41 for group in ("A", "B", "C")
 		},
 		paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
-		sms_timing=10, reminder_letter_days=[],
+		sms_days=[10], reminder_letter_days=[],
 	)
 	run = run_simulation(params, run_until=9.9, generate_plot=False)
 	assert any(household.sms_available for household in run.units[0].households)
@@ -143,8 +142,8 @@ def test_sms_immediate_removal_does_not_skip_the_next_household():
 		for _ in range(3)
 	]
 	sms_list = list(households)
-	env.process(sms_day_n_responses(
-		env, sms_list, 0, 1.0, SequenceRandom([0.0] * 3),
+	env.process(send_sms(
+		env, sms_list, [0], 1.0, SequenceRandom([0.0] * 3),
 	))
 	env.run(until=0.9)
 	assert all(household.responded for household in households)
@@ -157,13 +156,14 @@ def test_sms_process_finishes_at_send_time_without_delayed_cleanup():
 		responded=False, is_active=True, refusal=False, paper_first=False,
 	)
 	sms_list = [household]
-	process = env.process(sms_day_n_responses(
-		env, sms_list, 0, 0.0, SequenceRandom([0.5]),
+	process = env.process(send_sms(
+		env, sms_list, [0], 0.0, SequenceRandom([0.5]),
 	))
 
-	env.run(until=0.9)
+	env.run()
 
 	assert not process.is_alive
+	assert env.now == 0.85
 	assert env.peek() == float("inf")
 	assert sms_list == [household]
 	assert not household.responded
@@ -176,7 +176,7 @@ def test_national_sms_selection_and_sending_cover_all_regions_once(capsys):
 		daily_response_probabilities_by_group=dict.fromkeys(("A", "B", "C"), [0.0] * 50),
 		paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
 		field_first_day=20, field_last_day=20,
-		sms_timing=1, sms_response_probability=1.0, reminder_letter_days=[],
+		sms_days=[1], sms_response_probability=1.0, reminder_letter_days=[],
 	)
 	before = run_simulation(params, run_until=0.2, generate_plot=False)
 	expected = [house for unit in before.units for house in unit.households if house.sms_available]
@@ -197,6 +197,77 @@ def test_national_sms_selection_and_sending_cover_all_regions_once(capsys):
 	assert capsys.readouterr().out.count("SMS sent to houses on sms_list") == 1
 
 
+def test_sms_multiple_days_retry_nonrespondents_in_chronological_order():
+	env = simpy.Environment()
+	households = [
+		SimpleNamespace(responded=False, is_active=True, refusal=False, paper_first=False)
+		for _ in range(2)
+	]
+	sms_list = list(households)
+	open_households = list(households)
+	process = env.process(send_sms(
+		env, sms_list, [3, 1], 0.3, SequenceRandom([0.1, 0.8, 0.1]), open_households,
+	))
+	env.run(until=1.8)
+	assert not any(household.responded for household in households)
+	env.run(until=1.9)
+	assert [household.responded for household in households] == [True, False]
+	assert sms_list == open_households == [households[1]]
+	env.run(until=3.8)
+	assert not households[1].responded
+	env.run(until=3.9)
+	assert all(household.responded for household in households)
+	assert sms_list == open_households == []
+	assert not process.is_alive
+
+
+def test_empty_sending_days_disable_sms():
+	env = simpy.Environment()
+	household = SimpleNamespace(responded=False)
+	sms_list = [household]
+	env.process(send_sms(env, sms_list, [], 1.0, SequenceRandom([])))
+	env.run()
+	assert not household.responded
+	assert sms_list == [household]
+	assert env.now == 0
+
+
+@pytest.mark.parametrize("days", [[-1], [True], [1.5], [1, 1], None, [float("nan")]])
+def test_parameters_reject_invalid_sms_days(days):
+	with pytest.raises(ValueError, match="sms_days"):
+		dc.replace(baseline_parameters, sms_days=days)
+
+
+def test_sms_rechecks_eligibility_on_each_sending_day():
+	env = simpy.Environment()
+	household = SimpleNamespace(responded=False, is_active=True, refusal=False, paper_first=True)
+	sms_list = [household]
+	env.process(send_sms(env, sms_list, [0, 1], 1.0, SequenceRandom([0.0])))
+	env.run(until=1)
+	assert not household.responded
+	household.paper_first = False
+	env.run()
+	assert household.responded
+	assert sms_list == []
+
+
+def test_simulation_sends_sms_on_each_configured_day(capsys):
+	params = dc.replace(
+		baseline_parameters,
+		regions={"Test": RegionParameters(20, 0)},
+		daily_response_probabilities_by_group=dict.fromkeys(("A", "B", "C"), [0.0] * 50),
+		paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
+		sms_days=[3, 1], sms_response_probability=0.0, reminder_letter_days=[],
+	)
+	run = run_simulation(params, run_until=4, generate_plot=False)
+	assert run.sms_list
+	assert not any(household.responded for household in run.sms_list)
+	output = capsys.readouterr().out
+	assert output.count("SMS sent to houses on sms_list") == 2
+	assert "Day 1.85, SMS sent" in output
+	assert "Day 3.85, SMS sent" in output
+
+
 def test_monte_carlo_registers_one_fresh_national_sms_list_per_repeat(monkeypatch):
 	lists = []
 	populate = sms.populate_sms_list
@@ -209,7 +280,7 @@ def test_monte_carlo_registers_one_fresh_national_sms_list_per_repeat(monkeypatc
 	params = dc.replace(
 		baseline_parameters,
 		regions={"First": RegionParameters(10, 2), "Second": RegionParameters(10, 0)},
-		monte_carlo_repeats=2, sms_timing=10, reminder_letter_days=[],
+		monte_carlo_repeats=2, sms_days=[10], reminder_letter_days=[],
 	)
 	run_monte_carlo(params, run_until=1, generate_plot=False)
 	assert len(lists) == 2

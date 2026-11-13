@@ -12,8 +12,8 @@ flowchart TD
         OUTSTANDING -- "No" --> NOT_LISTED["Do not add to the SMS list"]
         OUTSTANDING -- "Yes" --> CONTACT{"Is a text-message contact route available?"}
         CONTACT -- "No" --> NOT_LISTED
-        CONTACT -- "Yes" --> ADD["Add to one central SMS list covering all regions<br/>It is selected for possible contact on the planned SMS day"]
-        ADD --> WAIT["Remain listed while waiting for the SMS day<br/>Being listed does not stop visits, calls, mail or other response opportunities"]
+        CONTACT -- "Yes" --> ADD["Add to one central SMS list covering all regions<br/>It is selected for possible contact on the planned SMS days"]
+        ADD --> WAIT["Remain listed while waiting for the next SMS day<br/>Being listed does not stop visits, calls, mail or other response opportunities"]
         ONCE["The list is selected once, shortly after initial responses on day 0<br/>No households are added later<br/>Households requiring paper can be listed"]
         ADD -.-> ONCE
     end
@@ -34,8 +34,8 @@ flowchart TD
         REMOVE_NOW --> OFF["No longer on the SMS list"]
     end
 
-    subgraph INTERVENTION["3. One planned text-message intervention"]
-        DAY["On the configured SMS day, later in the day<br/>Default: day 20<br/>One national intervention considers each household still on the central SMS list"]
+    subgraph INTERVENTION["3. Scheduled text-message interventions"]
+        DAY["On each configured SMS day, later in the day<br/>Default: [20]; multiple days supported; [] disables SMS<br/>Each send considers households still on the central SMS list"]
         DAY --> ELIGIBLE{"Still in the census population,<br/>not responded, not refusing<br/>and no longer requiring paper?"}
         ELIGIBLE -- "No" --> SKIP["No SMS response attempt for this household<br/>Listing alone is not enough to make it eligible"]
         ELIGIBLE -- "Yes" --> ATTEMPT["Give the household one chance to respond to the text message<br/>Default response chance: 30%"]
@@ -47,9 +47,10 @@ flowchart TD
         ATTEMPT -.-> NOTES
     end
 
-    subgraph AFTER["4. After the one-off intervention"]
-        SKIP --> REMAIN["Remain on the SMS list if still listed<br/>No second SMS intervention or scheduled housekeeping review occurs"]
+    subgraph AFTER["4. Between and after scheduled interventions"]
+        SKIP --> REMAIN["Remain on the SMS list if still listed<br/>Eligibility is rechecked on every later configured SMS day"]
         NO_RESPONSE --> REMAIN
+        REMAIN -- "Another configured SMS day" --> DAY
         REMAIN --> LATER["Any later response, whether of its own accord or through an intervention,<br/>removes the household immediately<br/>Identification of a vacancy also removes it immediately"]
         LATER -. "If removed by another route" .-> OFF
     end
@@ -60,7 +61,7 @@ flowchart TD
 census population unless identified as vacant. Requiring paper prevents an SMS
 response until a questionnaire has arrived; merely ordering it is not enough.
 
-Selection occurs at day 0 + 0.1; the intervention at the configured day + 0.85;
+Selection occurs at day 0 + 0.1; each intervention at its configured day + 0.85;
 there is no delayed cleanup. These offsets indicate simulation order, not
 real clock times. Other events can occur between these stages, and eligibility
 is checked using the household's state at the time of the intervention.

@@ -1,39 +1,40 @@
-def sms_day_n_responses(env, sms_list, n, sms_response_probability, rng, open_households=None):
-    """Apply the SMS intervention to households on the configured day.
+def send_sms(env, sms_list, sending_days, sms_response_probability, rng, open_households=None):
+    """Apply the SMS intervention on every configured day.
 
     Args:
         env: SimPy environment.
         sms_list: Mutable SMS contact list; successful respondents are removed immediately.
-        n: Simulation day on which SMS messages are sent.
-        sms_response_probability: One-off probability of responding to SMS.
+        sending_days: Simulation days on which SMS messages are sent.
+        sms_response_probability: Probability of responding to each SMS.
         rng: Random number generator used for SMS response draws.
         open_households: Optional outstanding list or list of per-unit outstanding
             lists from which successful responses are removed.
 
     Yields:
-        SimPy timeout event for the one-off SMS intervention.
+        SimPy timeout events for the scheduled SMS interventions.
     """
 
-    yield env.timeout(n + 0.85)
     outstanding_lists = (
         open_households
         if open_households and isinstance(open_households[0], list)
         else [open_households] if open_households is not None else []
     )
-    for household in list(sms_list):
-        if (
-            household.is_active
-            and not household.responded
-            and not household.refusal
-            and not household.paper_first
-        ):
-            if rng.random() < sms_response_probability:
-                household.responded = True
-                for outstanding in outstanding_lists:
-                    if household in outstanding:
-                        outstanding.remove(household)
-                sms_list.remove(household)
-    print(f" Day {env.now}, SMS sent to houses on sms_list. Response attempts completed")
+    for day in sorted(sending_days):
+        yield env.timeout(day + 0.85 - env.now)
+        for household in list(sms_list):
+            if (
+                household.is_active
+                and not household.responded
+                and not household.refusal
+                and not household.paper_first
+            ):
+                if rng.random() < sms_response_probability:
+                    household.responded = True
+                    for outstanding in outstanding_lists:
+                        if household in outstanding:
+                            outstanding.remove(household)
+                    sms_list.remove(household)
+        print(f" Day {env.now}, SMS sent to houses on sms_list. Response attempts completed")
 
 def populate_sms_list(env, households, sms_list):
     """Populate the SMS list with households eligible for messaging.

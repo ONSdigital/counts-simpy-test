@@ -33,7 +33,7 @@ def build_region(
     for group in ordered_groups[:remainder]:
         group_counts[group] += 1
     groups = [group for group, count in group_counts.items() for _ in range(count)]
-    random.Random(scenario_params.seed + unit_id_start).shuffle(groups)
+    random.Random(f"{scenario_params.seed}:{name}:group_shuffle").shuffle(groups)
 
     unit_count = max(region_params.num_field_officers, 1)
     households_per_unit, household_remainder = divmod(region_params.num_households, unit_count)

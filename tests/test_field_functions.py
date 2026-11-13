@@ -592,7 +592,7 @@ def test_simulation_applies_daily_visit_allowance_per_officer(daily_field_visits
         field_last_day=4,
         daily_response_probabilities_by_group={group: [0.0] * 50 for group in ("A", "B", "C")},
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
-        sms_timing=100,
+        sms_days=[100],
         field_answer_door_probability_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.0),
         field_vacancy_probability_if_no_answer=0.0,
         field_visit_response_probability_if_no_answer=0.0,
@@ -761,7 +761,7 @@ def test_monte_carlo_reports_slot_visit_counts_with_no_officer_region_disabled()
         field_visit_response_probability_if_no_answer=0.0,
         daily_response_probabilities_by_group=dict.fromkeys(("A", "B", "C"), [0.0] * 50),
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
-        sms_timing=100,
+        sms_days=[100],
     )
     result = run_monte_carlo(params, run_until=7, generate_plot=False)
 

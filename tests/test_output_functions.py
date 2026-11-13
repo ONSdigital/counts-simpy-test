@@ -131,7 +131,7 @@ def test_plot_household_return_proportions_saves_png_file(tmp_path):
 
     plot_household_return_proportions(
         history,
-        sms_day=1,
+        sms_days=[1],
         field_first_day=2,
         call_centre_history=call_history,
         show_plot=False,
@@ -167,7 +167,7 @@ def test_plot_household_return_proportions_saves_png_with_named_region_grid(tmp_
 
     plot_household_return_proportions(
         history,
-        sms_day=1,
+        sms_days=[1],
         field_first_day=2,
         show_plot=False,
         output_path=str(output_file),
@@ -382,8 +382,9 @@ def test_monte_carlo_summary_uses_mean_and_central_percentile_interval(values, e
 
 
 @pytest.mark.parametrize("sending_days", [None, [], [0, 1, 2], [2, 1, 1]])
+@pytest.mark.parametrize("sms_days", [None, [], [0, 2], [2, 1, 1]])
 @pytest.mark.parametrize("regional", [False, True])
-def test_plot_marks_reminder_sending_days_on_every_panel(sending_days, regional, monkeypatch):
+def test_plot_marks_sending_days_on_every_panel(sending_days, sms_days, regional, monkeypatch):
     import matplotlib.pyplot as plt
     from unittest.mock import Mock
 
@@ -395,7 +396,7 @@ def test_plot_marks_reminder_sending_days_on_every_panel(sending_days, regional,
     monkeypatch.setattr(plt, "show", Mock())
     plot_household_return_proportions(
         history,
-        sms_day=1,
+        sms_days=sms_days,
         field_first_day=2,
         reminder_letter_days=sending_days,
         region_histories={"North East": history, "Wales": history} if regional else None,
@@ -408,16 +409,20 @@ def test_plot_marks_reminder_sending_days_on_every_panel(sending_days, regional,
             markers = [line for line in axis.lines if line.get_color() == "tab:purple"]
             assert [list(line.get_xdata()) for line in markers] == [[day, day] for day in expected]
             assert all(line.get_linestyle() == "--" for line in markers)
-            assert any(line.get_color() == "tab:orange" for line in axis.lines)
+            sms_markers = [line for line in axis.lines if line.get_color() == "tab:orange"]
+            assert [list(line.get_xdata()) for line in sms_markers] == [
+                [day, day] for day in sorted(set(sms_days or []))
+            ]
             assert any(line.get_color() == "tab:red" for line in axis.lines)
         labels = [text.get_text() for legend in figure.legends for text in legend.get_texts()]
         assert labels.count("Reminder letters sent") == (1 if expected else 0)
+        assert labels.count("SMS sent") == (1 if sms_days else 0)
     finally:
         plt.close(figure)
 
 
 @pytest.mark.parametrize("repeated", [False, True])
-def test_runners_pass_reminder_sending_days_to_plot(repeated, monkeypatch):
+def test_runners_pass_sending_days_to_plot(repeated, monkeypatch):
     from unittest.mock import Mock
     from functions.simulation_runner import run_monte_carlo, run_simulation
     from parameters import RegionParameters, SimulationParameters
@@ -425,6 +430,7 @@ def test_runners_pass_reminder_sending_days_to_plot(repeated, monkeypatch):
     params = SimulationParameters(
         regions={"Test": RegionParameters(2, 0)},
         reminder_letter_days=[1, 3],
+        sms_days=[0, 2],
         pQ_postal_delay=5,
     )
     plot = Mock()
@@ -434,3 +440,4 @@ def test_runners_pass_reminder_sending_days_to_plot(repeated, monkeypatch):
 
     plot.assert_called_once()
     assert plot.call_args.kwargs["reminder_letter_days"] == [1, 3]
+    assert plot.call_args.kwargs["sms_days"] == [0, 2]

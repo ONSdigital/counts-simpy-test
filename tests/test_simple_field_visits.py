@@ -218,7 +218,7 @@ def test_simple_refusals_are_not_readded_or_revisited_in_later_days():
         field_success_probability_by_slot=dict.fromkeys(FIELD_VISIT_SLOTS, 0.0),
         daily_response_probabilities_by_group=dict.fromkeys(("A", "B", "C"), [0.0] * 50),
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), 0.0),
-        sms_timing=100, reminder_letter_days=[],
+        sms_days=[100], reminder_letter_days=[],
     )
     run = run_simulation(params, run_until=11, generate_plot=False)
     assert all(house.refusal and house.field_knocks == 1 for house in run.units[0].households)
@@ -237,7 +237,7 @@ def test_monte_carlo_tracks_simple_and_doorstep_successes_separately(paper_proba
         daily_response_probabilities_by_group=dict.fromkeys(("A", "B", "C"), [0.0] * 50),
         paper_first_probability_by_group=dict.fromkeys(("A", "B", "C"), paper_probability),
         call_centre_call_probability=0.0,
-        sms_timing=100, reminder_letter_days=[],
+        sms_days=[100], reminder_letter_days=[],
     )
     result = run_monte_carlo(params, run_until=7, generate_plot=False)
     assert result.params.field_visit_mode == "simple"

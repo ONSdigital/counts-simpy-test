@@ -91,7 +91,7 @@ The model runs on a SimPy environment. A typical run follows this high-level flo
 
    * first-day responses,
    * daily household response updates,
-   * SMS list population and one-off SMS response attempts,
+   * SMS list population and per-sending-day SMS response attempts,
    * field-officer list population and visit scheduling,
    * response-history collection for plotting.
 
@@ -230,11 +230,19 @@ Important parameters include:
    weekday or weekend field slots; other processes retain their timing.
 
 ``monte_carlo_repeats``
-   Positive integer number of independent runs (default 10). The app and script
+   Positive integer number of independent runs (default 1). The app and script
    report means and central 95% intervals using the 2.5th/97.5th percentiles
    across runs. This measures run-to-run variation, not confidence in the mean.
    One repeat gives a zero-width interval; small counts give unstable tails.
    Each repeat gets a distinct reproducible seed and fresh model/service state.
+   Unit generators use the run seed plus unit ID; the call centre uses the run
+   seed plus the maximum unit ID plus one. Repeat seed spacing keeps these
+   integer ranges separate across runs. The call-centre offset is no longer
+   fixed at 10,000, so exact seeded call outcomes can differ from earlier runs.
+   Regional group shuffling uses ``f"{run_seed}:{region_name}:group_shuffle"``,
+   separate from the first unit's seed and without another numeric offset.
+   This changes seeded group placement and potentially later outcomes, while
+   preserving regional group totals and reproducibility.
 
 ``regions``
    Region-name mapping to ``RegionParameters``. Each region specifies its own
@@ -252,11 +260,14 @@ Important parameters include:
    response attempts without changing the table. Defaults are 0.05 for all groups and days.
    Each group's first value also sets its time-zero response probability.
 
-``sms_timing``
-   Simulation day on which the one-off SMS response attempts occur.
+``sms_days``
+   List of unique non-negative integer sending days (default ``[20]``).
+   An empty list disables SMS. Days are sorted for scheduling at ``day + 0.85``,
+   matching reminder-letter sending. Eligible non-respondents can receive
+   another SMS on each later configured day.
 
 ``sms_response_probability``
-   One-off probability of responding to SMS (default 0.3).
+   Probability of responding to each SMS (default 0.3).
 
 ``reminder_letter_days``
    List of unique non-negative integer sending days, under fixed parameters
@@ -371,6 +382,13 @@ Module And API Reference
    reproducible seeds; ``call_centre_history`` contains mean daily call demand.
    Household objects are not retained across repeats. Regions share a clock
    and services within each run; repeats start fresh and execute sequentially.
+   Per-run histories and final metrics are held temporarily for summarisation,
+   but are not returned or saved separately. Only combined results and run
+   seeds remain available after the call. Scenario settings stay identical
+   across repeats except for the seed and the internal repeat count of one.
+   Each run seed is the starting seed plus the repeat index times
+   ``max(10_001, number_of_units + 1)``. Zero-officer regions still have one
+   internal unit and count towards this spacing.
 
 .. py:function:: run_simulation(scenario_params=baseline_parameters, run_until=50, ...)
 
@@ -415,20 +433,21 @@ Module And API Reference
 ``functions.functions_sms`` module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Each run registers one national selection process and one SMS intervention.
+Each run registers one national selection process and one SMS scheduling process.
 All officer units reference the same central SMS list so daily responses,
 field outcomes and reminder responses remove contacts immediately.
 SMS uses a dedicated reproducible random stream. Each Monte Carlo repeat
 starts with a fresh national list; regional response reporting is preserved.
 
-.. py:function:: sms_day_n_responses(env, sms_list, n, sms_response_probability, rng, open_households=None)
+.. py:function:: send_sms(env, sms_list, sending_days, sms_response_probability, rng, open_households=None)
 
-   SimPy process that waits until time ``n + 0.85`` and makes a single response
+   SimPy process that loops over sorted sending days, waits until
+   ``day + 0.85`` and makes one response
    draw for each active, outstanding, non-refusing, non-paper-first household
    in ``sms_list``. Success records an immediate return and removes the household
    from the open and SMS lists immediately. Failure has no lasting effect on
-   daily probabilities. The process finishes after the one-off intervention;
-   there is no delayed housekeeping check.
+   daily probabilities. Eligibility is rechecked on every sending day.
+   The process finishes after the final send; there is no delayed housekeeping check.
 
 .. py:function:: populate_sms_list(env, households, sms_list)
 
@@ -524,14 +543,16 @@ starts with a fresh national list; regional response reporting is preserved.
    SimPy process that records output snapshots for plotting. After allowing
    first-day responses to happen at ``t = 0``, it stores:
 
-   * the current simulation time,
-   * the total number of households responded,
+   * the day label (snapshot time minus 0.9, rounded to ten decimal places),
+   * the active population and active households responded,
    * the overall response proportion,
    * one response-proportion series per demographic group.
 
-   The process then repeats once per simulated day.
+   Snapshots occur at ``t = 0.9, 1.9, 2.9, ...``, labelled days 0, 1, 2,
+   and include group-level active counts. Initial population counts remain
+   fixed. A run stopping at 50 has snapshots labelled 0 through 49.
 
-.. py:function:: plot_household_return_proportions(history, sms_day=None, field_first_day=None, call_centre_history=None, show_plot=False, output_path=None, region_histories=None, reminder_letter_days=None)
+.. py:function:: plot_household_return_proportions(history, sms_days=None, field_first_day=None, call_centre_history=None, show_plot=False, output_path=None, region_histories=None, reminder_letter_days=None)
 
    ``reminder_letter_days`` adds purple dashed sending-day markers to every
    overall and regional panel, with one shared legend entry. Postal delay is
@@ -539,8 +560,10 @@ starts with a fresh national list; regional response reporting is preserved.
 
    Plots overall and group return curves with named regional panels below.
    For Monte Carlo histories, curves are means and shaded bands are pointwise
-   central 95% run intervals. Existing end-of-day labels and straight-line
-   interpolation are unchanged, as are SMS and field-start markers.
+   central 95% run intervals for the overall curve in each panel. Group curves
+   show means without shaded group intervals. Call-centre history is accepted
+   but not plotted. Daily labels and straight-line interpolation are unchanged,
+   as are SMS and field-start markers.
 
 
 ``simulation`` module

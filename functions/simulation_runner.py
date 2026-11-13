@@ -44,7 +44,7 @@ def run_monte_carlo(
     output_path=None,
 ):
     """Repeat the regional model with independent seeds and summarise run variation."""
-
+    #generate the correct number of random seeds
     seed_stride = max(
         10_001,
         1 + sum(max(region.num_field_officers, 1) for region in scenario_params.regions.values()),
@@ -59,6 +59,14 @@ def run_monte_carlo(
     region_histories = {name: [] for name in scenario_params.regions}
     call_histories = []
 
+     #function to summarise final metrics for monte carlo run (not at a certain time, but overall)
+    def summarise_metrics(run_values):
+            return {
+                key: out.summarise_monte_carlo_values([values[key] for values in run_values])
+                for key in run_values[0]
+            }
+
+#function to format final metrics for a single run
     def final_metrics(history, households, units):
         if not history["time"]:
             raise ValueError("run_until must include at least one response snapshot")
@@ -88,7 +96,7 @@ def run_monte_carlo(
             },
             "doorstep_completions": sum(household.doorstep_completions for household in households),
         }
-
+#for each repeat in a monte carlo, run the simulation, collect metrics and add to the overall values/histories produced above
     for repeat, seed in enumerate(run_seeds):
         if progress_interval:
             print(f"Monte Carlo run {repeat + 1}/{len(run_seeds)} (seed {seed})")
@@ -118,13 +126,9 @@ def run_monte_carlo(
                 final_metrics(region.return_history, region.households, region.units)
             )
             region_histories[region.name].append(region.return_history)
+   
 
-    def summarise_metrics(run_values):
-        return {
-            key: out.summarise_monte_carlo_values([values[key] for values in run_values])
-            for key in run_values[0]
-        }
-
+    #combine the histories from all Monte Carlo runs, maintaining the snapshot structure
     aggregate_history = out.summarise_monte_carlo_histories(histories)
     combined_regions = {
         name: out.summarise_monte_carlo_histories(values)
@@ -137,12 +141,14 @@ def run_monte_carlo(
         "daily_calls_lower_95": np.quantile(daily_calls, 0.025, axis=0).tolist(),
         "daily_calls_upper_95": np.quantile(daily_calls, 0.975, axis=0).tolist(),
     }
+    #add weekday information to each history based on the scenario parameters
     for history in (aggregate_history, call_centre_history, *combined_regions.values()):
         history["weekday"] = [scenario_params.weekday_at(time) for time in history["time"]]
+    
     if generate_plot:
         out.plot_household_return_proportions(
             aggregate_history,
-            sms_day=scenario_params.sms_timing,
+            sms_days=scenario_params.sms_days,
             field_first_day=scenario_params.field_first_day,
             call_centre_history=call_centre_history,
             show_plot=show_plot,
@@ -214,15 +220,17 @@ def run_simulation(
     all_households = [household for unit in units for household in unit.households]
     env.process(sms.populate_sms_list(env, all_households, sms_list))
     env.process(
-        sms.sms_day_n_responses(
-            env, sms_list, scenario_params.sms_timing,
+        sms.send_sms(
+            env, sms_list, scenario_params.sms_days,
             scenario_params.sms_response_probability,
             random.Random(f"{scenario_params.seed}:national_sms"),
             all_open_household_lists,
         )
     )
     call_centre_history = out.initialise_call_centre_history()
-    call_centre_rng = random.Random(scenario_params.seed + 10_000)
+    call_centre_rng = random.Random(
+        scenario_params.seed + max(unit.unit_id for unit in units) + 1
+    )
     env.process(
         cc.process_call_centre_calls(
             env,
@@ -277,7 +285,7 @@ def run_simulation(
     if generate_plot:
         out.plot_household_return_proportions(
             aggregate_history,
-            sms_day=scenario_params.sms_timing,
+            sms_days=scenario_params.sms_days,
             field_first_day=scenario_params.field_first_day,
             call_centre_history=call_centre_history,
             show_plot=show_plot,
